@@ -1,0 +1,85 @@
+{
+  "default": "sunset-pop",
+  "themes": [
+    {
+      "id": "sunset-pop",
+      "name": "Sunset Pop",
+      "description": "Warm neon dusk with coral, amber, and ocean accents.",
+      "colors": {
+        "background": "#1B1A33",
+        "panel": "#252446",
+        "text": "#F9F7FF",
+        "muted": "#B8B5D9",
+        "accent": "#FF7A59",
+        "accent2": "#FFD166",
+        "success": "#7AE582",
+        "warning": "#FFB703",
+        "danger": "#FF4D6D",
+        "chart1": "#FF7A59",
+        "chart2": "#00B4D8",
+        "chart3": "#FFD166",
+        "chart4": "#80ED99"
+      }
+    },
+    {
+      "id": "mint-circuit",
+      "name": "Mint Circuit",
+      "description": "Fresh mint and steel palette with high readability.",
+      "colors": {
+        "background": "#0E1A1F",
+        "panel": "#13262D",
+        "text": "#E8FFFB",
+        "muted": "#9BC7C0",
+        "accent": "#2EC4B6",
+        "accent2": "#CBF3F0",
+        "success": "#80ED99",
+        "warning": "#FFCA3A",
+        "danger": "#FF595E",
+        "chart1": "#2EC4B6",
+        "chart2": "#90E0EF",
+        "chart3": "#FFD166",
+        "chart4": "#80ED99"
+      }
+    },
+    {
+      "id": "paper-fruit",
+      "name": "Paper Fruit",
+      "description": "Bright editorial theme with creamy paper base and juicy accents.",
+      "colors": {
+        "background": "#FFF8E8",
+        "panel": "#FFF0CC",
+        "text": "#1F2933",
+        "muted": "#5C677D",
+        "accent": "#FF6B6B",
+        "accent2": "#4D96FF",
+        "success": "#2D6A4F",
+        "warning": "#F4A261",
+        "danger": "#D62828",
+        "chart1": "#FF6B6B",
+        "chart2": "#4D96FF",
+        "chart3": "#FFD166",
+        "chart4": "#06D6A0"
+      }
+    },
+    {
+      "id": "midnight-arcade",
+      "name": "Midnight Arcade",
+      "description": "Playful deep-night palette with electric highlights.",
+      "colors": {
+        "background": "#0A0F1F",
+        "panel": "#111936",
+        "text": "#F1F5FF",
+        "muted": "#A3B3E0",
+        "accent": "#00E5FF",
+        "accent2": "#FF9E00",
+        "success": "#70E000",
+        "warning": "#FFD166",
+        "danger": "#EF476F",
+        "chart1": "#00E5FF",
+        "chart2": "#FF9E00",
+        "chart3": "#B5179E",
+        "chart4": "#70E000"
+      }
+    }
+  ]
+}
