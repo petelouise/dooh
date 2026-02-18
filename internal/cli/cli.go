@@ -14,6 +14,7 @@ import (
 	"dooh/internal/auth"
 	"dooh/internal/config"
 	"dooh/internal/db"
+	"dooh/internal/demo"
 	"dooh/internal/exporter"
 	"dooh/internal/idgen"
 	"dooh/internal/tui"
@@ -64,6 +65,8 @@ func Run(args []string, stdout io.Writer) error {
 		return runConfig(rt, rest[1:], stdout)
 	case "db":
 		return runDB(rt, rest[1:], stdout)
+	case "demo":
+		return runDemo(rt, rest[1:], stdout)
 	case "user":
 		return runUser(rt, rest[1:], stdout)
 	case "key":
@@ -87,7 +90,7 @@ func Run(args []string, stdout io.Writer) error {
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "dooh (pronounced duo)")
 	_, _ = fmt.Fprintln(w, "global flags: --profile <name> --config <path>")
-	_, _ = fmt.Fprintln(w, "commands: config, db, user, key, task, collection, export, tui, version")
+	_, _ = fmt.Fprintln(w, "commands: config, db, demo, user, key, task, collection, export, tui, version")
 }
 
 func parseGlobal(args []string) (globalOpts, []string, error) {
@@ -216,6 +219,30 @@ func runDB(rt runtime, args []string, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "initialized database: %s\n", dbResolved)
 	return nil
+}
+
+func runDemo(rt runtime, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("demo subcommand required")
+	}
+	switch args[0] {
+	case "seed":
+		fs := flag.NewFlagSet("demo seed", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dbPath := fs.String("db", "", "sqlite database path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		sqlite := db.New(resolveDB(rt, *dbPath))
+		res, err := demo.Seed(sqlite)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "seeded demo data: users=%d collections=%d tasks=%d\n", res.Users, res.Collections, res.Tasks)
+		return nil
+	default:
+		return fmt.Errorf("unknown demo command %q", args[0])
+	}
 }
 
 func runUser(rt runtime, args []string, out io.Writer) error {
@@ -587,6 +614,9 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	fs.SetOutput(io.Discard)
 	theme := fs.String("theme", "", "theme")
 	listThemes := fs.Bool("list-themes", false, "list theme presets")
+	filter := fs.String("filter", "", "filter tasks by text")
+	limit := fs.Int("limit", 12, "max tasks to display")
+	dbPath := fs.String("db", "", "sqlite database path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -616,7 +646,11 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 		}
 		return fmt.Errorf("unknown theme %q (available: %s)", selected, strings.Join(ids, ", "))
 	}
-	_, _ = fmt.Fprintf(out, "TODO: launch TUI with theme %s (%s)\n", chosen.ID, chosen.Name)
+	panel, err := tui.RenderDashboard(db.New(resolveDB(rt, *dbPath)), chosen, *filter, *limit)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprint(out, panel)
 	return nil
 }
 
