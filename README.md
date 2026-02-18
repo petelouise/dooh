@@ -41,6 +41,19 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection list --db ./dooh.db
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --out ./site-data
 ```
 
+Relationship commands:
+```bash
+go run ./cmd/dooh task block --id <task> --by <task>
+go run ./cmd/dooh task unblock --id <task> --by <task>
+go run ./cmd/dooh task subtask add --parent <task> --child <task>
+go run ./cmd/dooh task subtask remove --parent <task> --child <task>
+go run ./cmd/dooh task assign add --id <task> --user <user_id>
+go run ./cmd/dooh task assign remove --id <task> --user <user_id>
+go run ./cmd/dooh task reopen --id <task>
+go run ./cmd/dooh collection link --parent <collection> --child <collection>
+go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
+```
+
 ## Fast demo seed + colorful dashboard
 ```bash
 export GOCACHE="$(pwd)/.cache/go-build"
