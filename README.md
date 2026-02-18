@@ -32,8 +32,9 @@ HUMAN_ID=$(sqlite3 -noheader ./dooh.db "select id from users limit 1;")
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh key create --db ./dooh.db --user "$HUMAN_ID" --client-type human_cli --scopes "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback" --bootstrap
 
 # 4) use printed api_key for writes
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task add --db ./dooh.db --actor human --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection add --db ./dooh.db --actor human --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
+export DOOH_MODE=human
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task add --db ./dooh.db --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
 
 # 5) list + export
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task list --db ./dooh.db
@@ -53,6 +54,11 @@ go run ./cmd/dooh task reopen --id <task>
 go run ./cmd/dooh collection link --parent <collection> --child <collection>
 go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
 ```
+
+For all mutating commands:
+- set `DOOH_MODE=human` or `DOOH_MODE=agent`.
+- `human` mode requires `--api-key` on each write command.
+- `agent` mode requires key from env (`DOOH_API_KEY`), and rejects `--api-key`.
 
 ## Fast demo seed + colorful dashboard
 ```bash
@@ -76,7 +82,7 @@ Profiles are named blocks in config files:
 
 Precedence:
 - command flags
-- env vars (`DOOH_DB`, `DOOH_ACTOR`, profile-selected key env var)
+- env vars (`DOOH_DB`, profile-selected key env var)
 - selected profile (`--profile` or `DOOH_PROFILE`)
 - `[profile.default]`
 - built-in defaults
@@ -93,6 +99,7 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
 ```
 
 ## Auth safety behavior
-- `--actor human` requires explicit `--api-key` (no env fallback) to reduce accidental AI impersonation.
-- `--actor agent` can use `--api-key` or `DOOH_API_KEY`.
+- `DOOH_MODE` is required for mutating commands and must be `human` or `agent`.
+- `human` mode requires explicit `--api-key` (no env fallback) to reduce accidental AI impersonation.
+- `agent` mode requires env key (`DOOH_API_KEY` or profile `api_key_env`) and rejects `--api-key`.
 - Key `client_type` must match actor (`human_cli` or `agent_cli`) unless key type is `system`.
