@@ -59,6 +59,13 @@
 - Deterministic sorted JSON for stable diffs.
 - No always-on server required.
 
+## Demo and validation
+- `dooh demo seed` inserts varied users, collections, and tasks for quick manual testing.
+- `dooh tui` renders a colorful read-only dashboard from live DB data.
+- automated tests cover:
+- config profile parsing/merge behavior
+- demo seeding creating expected task/collection data
+
 ## TUI theme presets
 `internal/tui/themes/presets.json` includes:
 - `sunset-pop`

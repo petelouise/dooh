@@ -41,10 +41,19 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection list --db ./dooh.db
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --out ./site-data
 ```
 
+## Fast demo seed + colorful dashboard
+```bash
+export GOCACHE="$(pwd)/.cache/go-build"
+go run ./cmd/dooh db init --db ./dooh.db
+go run ./cmd/dooh demo seed --db ./dooh.db
+go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12
+```
+
 ## Theme presets
 ```bash
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --list-themes
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --theme sunset-pop
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --theme sunset-pop --filter rollback
 ```
 
 ## Config profiles
