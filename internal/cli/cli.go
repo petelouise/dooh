@@ -302,8 +302,7 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 		_, _ = fmt.Fprintln(out, strings.Repeat("-", 92))
 		for _, r := range rows {
 			if len(r) >= 4 {
-				status := colorizeStatus(r[2])
-				_, _ = fmt.Fprintf(out, "%-20s %-9s %-24s %s\n", truncate(r[1], 20), status, truncate(r[3], 24), r[0])
+				_, _ = fmt.Fprintf(out, "%-20s %s %-24s %s\n", truncate(r[1], 20), statusCell(r[2], 9), truncate(r[3], 24), r[0])
 			}
 		}
 		return nil
@@ -445,10 +444,10 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		_, _ = fmt.Fprintln(out, strings.Repeat("-", 100))
 		for _, r := range rows {
 			if len(r) >= 5 {
-				_, _ = fmt.Fprintf(out, "%-40s %-10s %-8s %-24s %s\n",
+				_, _ = fmt.Fprintf(out, "%-40s %s %s %-24s %s\n",
 					truncate(r[0], 40),
-					colorizeStatus(r[1]),
-					colorizePriority(r[2]),
+					statusCell(r[1], 10),
+					priorityCell(r[2], 8),
 					truncate(r[3], 24),
 					r[4],
 				)
@@ -822,7 +821,7 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 			if len(r) >= 5 {
 				_, _ = fmt.Fprintf(out, "%-20s %-10s %-10s %-24s %s\n",
 					truncate(r[1], 20),
-					colorizeKind(r[2]),
+					kindCell(r[2], 10),
 					style(truncate(r[3], 10), "38;5;45"),
 					truncate(r[4], 24),
 					r[0],
@@ -1308,6 +1307,52 @@ func colorizeKind(v string) string {
 		return style("area", "38;5;209")
 	default:
 		return v
+	}
+}
+
+func statusCell(v string, width int) string {
+	raw := fmt.Sprintf("%-*s", width, strings.ToLower(strings.TrimSpace(v)))
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "completed":
+		return style(raw, "38;5;78")
+	case "archived":
+		return style(raw, "38;5;179")
+	case "open":
+		return style(raw, "38;5;81")
+	default:
+		return raw
+	}
+}
+
+func priorityCell(v string, width int) string {
+	raw := fmt.Sprintf("%-*s", width, strings.ToLower(strings.TrimSpace(v)))
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "now":
+		return style(raw, "38;5;203")
+	case "soon":
+		return style(raw, "38;5;221")
+	case "later":
+		return style(raw, "38;5;111")
+	default:
+		return raw
+	}
+}
+
+func kindCell(v string, width int) string {
+	raw := fmt.Sprintf("%-*s", width, strings.ToLower(strings.TrimSpace(v)))
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "project":
+		return style(raw, "38;5;75")
+	case "goal":
+		return style(raw, "38;5;220")
+	case "tag":
+		return style(raw, "38;5;43")
+	case "class":
+		return style(raw, "38;5;119")
+	case "area":
+		return style(raw, "38;5;209")
+	default:
+		return raw
 	}
 }
 
