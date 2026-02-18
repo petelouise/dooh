@@ -13,7 +13,7 @@ func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int) (s
 		limit = 20
 	}
 
-	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT short_id,title,status,priority,COALESCE(due_at,''),COALESCE(scheduled_at,''),updated_at FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT %d;", limit*4))
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT title,status,priority,COALESCE(due_at,''),COALESCE(scheduled_at,''),updated_at,short_id FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT %d;", limit*4))
 	if err != nil {
 		return "", err
 	}
@@ -81,7 +81,7 @@ func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int) (s
 		if r[2] == "archived" {
 			statusColor = theme.Colors["warning"]
 		}
-		line := fmt.Sprintf("%s  %-9s %-6s  %s", r[0], r[2], r[3], r[1])
+		line := fmt.Sprintf("%-42s %-9s %-6s %s", r[0], r[1], r[2], r[6])
 		b.WriteString(fg(statusColor, line) + "\n")
 	}
 

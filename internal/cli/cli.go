@@ -434,7 +434,7 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		rows, err := db.New(resolveDB(rt, *dbPath)).QueryTSV("SELECT short_id,title,status,priority,updated_at FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
+		rows, err := db.New(resolveDB(rt, *dbPath)).QueryTSV("SELECT title,status,priority,updated_at,short_id FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
 		if err != nil {
 			return err
 		}
