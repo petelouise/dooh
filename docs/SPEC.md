@@ -9,6 +9,7 @@
 - Human uses OS keychain key (not in `.env`).
 - Read-only website integration via static JSON export.
 - Colorful, keyboard-first TUI with selectable themes.
+- Config profiles supported via `--profile` / `DOOH_PROFILE`.
 
 ## Identity and auth model
 - Every mutating action requires API key auth.
@@ -16,6 +17,14 @@
 - Required write flag: `--actor human|agent`.
 - `--actor human` requires interactive TTY and keychain retrieval.
 - `--actor agent` uses `DOOH_API_KEY` from environment.
+
+## Config profile separation
+- Files:
+- `~/.config/dooh/config.toml` (global baseline)
+- `./.dooh/config.toml` (project override)
+- Sections: `[profile.default]`, `[profile.human]`, `[profile.agent]`, etc.
+- Resolution order:
+- flags > env > selected profile > default profile > built-in defaults
 
 ## Scope model
 - Agent scopes: `tasks:read`, `tasks:write`, `tasks:delete`, `collections:read`, `collections:write`, `export:run`.

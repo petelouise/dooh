@@ -14,6 +14,11 @@ Working local MVP includes:
 GOCACHE=$(pwd)/.cache/go-build go build ./cmd/dooh
 ```
 
+`GOCACHE=...` prefixed this way is per-command (temporary). If you want it for your current shell session:
+```bash
+export GOCACHE="$(pwd)/.cache/go-build"
+```
+
 ## Quick start
 ```bash
 # 1) initialize database
@@ -40,6 +45,29 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --ou
 ```bash
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --list-themes
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --theme sunset-pop
+```
+
+## Config profiles
+Profiles are named blocks in config files:
+- global: `~/.config/dooh/config.toml`
+- project override: `./.dooh/config.toml`
+
+Precedence:
+- command flags
+- env vars (`DOOH_DB`, `DOOH_ACTOR`, profile-selected key env var)
+- selected profile (`--profile` or `DOOH_PROFILE`)
+- `[profile.default]`
+- built-in defaults
+
+Generate a starter file:
+```bash
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh config init
+```
+
+Inspect resolved config:
+```bash
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh config show
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
 ```
 
 ## Auth safety behavior
