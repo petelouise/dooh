@@ -446,8 +446,18 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		return nil
 	case "complete":
 		return runTaskStatus(rt, args[1:], out, "completed", "task.completed")
+	case "reopen":
+		return runTaskStatus(rt, args[1:], out, "open", "task.reopened")
 	case "archive":
 		return runTaskStatus(rt, args[1:], out, "archived", "task.archived")
+	case "block":
+		return runTaskBlock(rt, args[1:], out, true)
+	case "unblock":
+		return runTaskBlock(rt, args[1:], out, false)
+	case "subtask":
+		return runTaskSubtask(rt, args[1:], out)
+	case "assign":
+		return runTaskAssign(rt, args[1:], out)
 	case "delete":
 		fs := flag.NewFlagSet("task delete", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
@@ -499,6 +509,19 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 	if err != nil {
 		return err
 	}
+	taskID, shortID, _, err := resolveTask(sqlite, *target)
+	if err != nil {
+		return err
+	}
+	if status == "completed" {
+		blocked, err := hasOpenBlockers(sqlite, taskID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return errors.New("cannot complete task while blockers are open")
+		}
+	}
 	extra := ""
 	if status == "completed" {
 		extra = ", completed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
@@ -506,15 +529,221 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 	if status == "archived" {
 		extra = ", archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 	}
-	sql := fmt.Sprintf("UPDATE tasks SET status=%s, updated_by=%s, version=version+1 %s WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL;",
-		db.Quote(status), db.Quote(p.UserID), extra, db.Quote(*target), db.Quote(*target))
+	if status == "open" {
+		extra = ", completed_at = NULL, archived_at = NULL"
+	}
+	sql := fmt.Sprintf("UPDATE tasks SET status=%s, updated_by=%s, version=version+1 %s WHERE id=%s AND deleted_at IS NULL;",
+		db.Quote(status), db.Quote(p.UserID), extra, db.Quote(taskID))
 	if err := sqlite.Exec(sql); err != nil {
 		return err
 	}
-	if err := writeEvent(sqlite, p, eventName, "task", *target, map[string]string{"target": *target, "status": status}); err != nil {
+	if err := writeEvent(sqlite, p, eventName, "task", taskID, map[string]string{"task_id": taskID, "short_id": shortID, "status": status}); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "%s task %s\n", status, *target)
+	if err := syncParentsForChild(sqlite, taskID, p.UserID); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "%s task %s\n", status, shortID)
+	return nil
+}
+
+func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
+	fs := flag.NewFlagSet("task block", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	target := fs.String("id", "", "task id or short id")
+	by := fs.String("by", "", "blocking task id or short id")
+	dbPath := fs.String("db", "", "sqlite database path")
+	actor := fs.String("actor", "", "human|agent")
+	apiKey := fs.String("api-key", "", "api key")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *target == "" || *by == "" {
+		return errors.New("--id and --by are required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	if err != nil {
+		return err
+	}
+	taskID, _, _, err := resolveTask(sqlite, *target)
+	if err != nil {
+		return err
+	}
+	blockerID, _, _, err := resolveTask(sqlite, *by)
+	if err != nil {
+		return err
+	}
+	if taskID == blockerID {
+		return errors.New("task cannot block itself")
+	}
+	if add {
+		hasPath, err := hasDependencyPath(sqlite, blockerID, taskID)
+		if err != nil {
+			return err
+		}
+		if hasPath {
+			return errors.New("dependency cycle detected")
+		}
+		sql := fmt.Sprintf("INSERT OR IGNORE INTO task_dependencies(task_id,blocked_by_task_id) VALUES(%s,%s);", db.Quote(taskID), db.Quote(blockerID))
+		if err := sqlite.Exec(sql); err != nil {
+			return err
+		}
+		if err := writeEvent(sqlite, p, "task.blocked", "task", taskID, map[string]string{"task_id": taskID, "blocked_by_task_id": blockerID}); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "task %s now blocked by %s\n", *target, *by)
+		return nil
+	}
+	sql := fmt.Sprintf("DELETE FROM task_dependencies WHERE task_id=%s AND blocked_by_task_id=%s;", db.Quote(taskID), db.Quote(blockerID))
+	if err := sqlite.Exec(sql); err != nil {
+		return err
+	}
+	if err := writeEvent(sqlite, p, "task.unblocked", "task", taskID, map[string]string{"task_id": taskID, "blocked_by_task_id": blockerID}); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "task %s unblocked by %s\n", *target, *by)
+	return nil
+}
+
+func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("task subtask subcommand required: add|remove")
+	}
+	add := false
+	switch args[0] {
+	case "add":
+		add = true
+	case "remove":
+		add = false
+	default:
+		return fmt.Errorf("unknown task subtask command %q", args[0])
+	}
+	fs := flag.NewFlagSet("task subtask", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	parent := fs.String("parent", "", "parent task id or short id")
+	child := fs.String("child", "", "child task id or short id")
+	dbPath := fs.String("db", "", "sqlite database path")
+	actor := fs.String("actor", "", "human|agent")
+	apiKey := fs.String("api-key", "", "api key")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *parent == "" || *child == "" {
+		return errors.New("--parent and --child are required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	if err != nil {
+		return err
+	}
+	parentID, _, _, err := resolveTask(sqlite, *parent)
+	if err != nil {
+		return err
+	}
+	childID, _, _, err := resolveTask(sqlite, *child)
+	if err != nil {
+		return err
+	}
+	if parentID == childID {
+		return errors.New("task cannot be a subtask of itself")
+	}
+	if add {
+		hasPath, err := hasSubtaskPath(sqlite, childID, parentID)
+		if err != nil {
+			return err
+		}
+		if hasPath {
+			return errors.New("subtask cycle detected")
+		}
+		sql := fmt.Sprintf("INSERT OR IGNORE INTO task_subtasks(parent_task_id,child_task_id) VALUES(%s,%s);", db.Quote(parentID), db.Quote(childID))
+		if err := sqlite.Exec(sql); err != nil {
+			return err
+		}
+		if err := writeEvent(sqlite, p, "task.subtask_added", "task", parentID, map[string]string{"parent_task_id": parentID, "child_task_id": childID}); err != nil {
+			return err
+		}
+		if err := syncParentStatus(sqlite, parentID, p.UserID); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "added subtask %s -> %s\n", *parent, *child)
+		return nil
+	}
+	sql := fmt.Sprintf("DELETE FROM task_subtasks WHERE parent_task_id=%s AND child_task_id=%s;", db.Quote(parentID), db.Quote(childID))
+	if err := sqlite.Exec(sql); err != nil {
+		return err
+	}
+	if err := writeEvent(sqlite, p, "task.subtask_removed", "task", parentID, map[string]string{"parent_task_id": parentID, "child_task_id": childID}); err != nil {
+		return err
+	}
+	if err := syncParentStatus(sqlite, parentID, p.UserID); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "removed subtask %s -> %s\n", *parent, *child)
+	return nil
+}
+
+func runTaskAssign(rt runtime, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("task assign subcommand required: add|remove")
+	}
+	add := false
+	switch args[0] {
+	case "add":
+		add = true
+	case "remove":
+		add = false
+	default:
+		return fmt.Errorf("unknown task assign command %q", args[0])
+	}
+	fs := flag.NewFlagSet("task assign", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	target := fs.String("id", "", "task id or short id")
+	user := fs.String("user", "", "user id")
+	dbPath := fs.String("db", "", "sqlite database path")
+	actor := fs.String("actor", "", "human|agent")
+	apiKey := fs.String("api-key", "", "api key")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *target == "" || *user == "" {
+		return errors.New("--id and --user are required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	if err != nil {
+		return err
+	}
+	taskID, _, _, err := resolveTask(sqlite, *target)
+	if err != nil {
+		return err
+	}
+	ok, err := userExists(sqlite, *user)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown user %s", *user)
+	}
+	if add {
+		sql := fmt.Sprintf("INSERT OR IGNORE INTO task_assignees(task_id,user_id) VALUES(%s,%s);", db.Quote(taskID), db.Quote(*user))
+		if err := sqlite.Exec(sql); err != nil {
+			return err
+		}
+		if err := writeEvent(sqlite, p, "task.assignee_added", "task", taskID, map[string]string{"task_id": taskID, "user_id": *user}); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "assigned task %s to %s\n", *target, *user)
+		return nil
+	}
+	sql := fmt.Sprintf("DELETE FROM task_assignees WHERE task_id=%s AND user_id=%s;", db.Quote(taskID), db.Quote(*user))
+	if err := sqlite.Exec(sql); err != nil {
+		return err
+	}
+	if err := writeEvent(sqlite, p, "task.assignee_removed", "task", taskID, map[string]string{"task_id": taskID, "user_id": *user}); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "unassigned task %s from %s\n", *target, *user)
 	return nil
 }
 
@@ -582,9 +811,78 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 			}
 		}
 		return nil
+	case "link":
+		return runCollectionLink(rt, args[1:], out, true)
+	case "unlink":
+		return runCollectionLink(rt, args[1:], out, false)
 	default:
 		return fmt.Errorf("unknown collection command %q", args[0])
 	}
+}
+
+func runCollectionLink(rt runtime, args []string, out io.Writer, add bool) error {
+	fs := flag.NewFlagSet("collection link", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	parent := fs.String("parent", "", "parent collection id or short id")
+	child := fs.String("child", "", "child collection id or short id")
+	dbPath := fs.String("db", "", "sqlite database path")
+	actor := fs.String("actor", "", "human|agent")
+	apiKey := fs.String("api-key", "", "api key")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *parent == "" || *child == "" {
+		return errors.New("--parent and --child are required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "collections:write")
+	if err != nil {
+		return err
+	}
+	parentID, _, err := resolveCollection(sqlite, *parent)
+	if err != nil {
+		return err
+	}
+	childID, _, err := resolveCollection(sqlite, *child)
+	if err != nil {
+		return err
+	}
+	if parentID == childID {
+		return errors.New("collection cannot link to itself")
+	}
+	if add {
+		hasPath, err := hasCollectionPath(sqlite, childID, parentID)
+		if err != nil {
+			return err
+		}
+		if hasPath {
+			return errors.New("collection hierarchy cycle detected")
+		}
+		sql := fmt.Sprintf("INSERT OR IGNORE INTO collection_links(parent_collection_id,child_collection_id) VALUES(%s,%s);", db.Quote(parentID), db.Quote(childID))
+		if err := sqlite.Exec(sql); err != nil {
+			return err
+		}
+		if err := rebuildCollectionClosure(sqlite); err != nil {
+			return err
+		}
+		if err := writeEvent(sqlite, p, "collection.linked", "collection", parentID, map[string]string{"parent_collection_id": parentID, "child_collection_id": childID}); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "linked collection %s -> %s\n", *parent, *child)
+		return nil
+	}
+	sql := fmt.Sprintf("DELETE FROM collection_links WHERE parent_collection_id=%s AND child_collection_id=%s;", db.Quote(parentID), db.Quote(childID))
+	if err := sqlite.Exec(sql); err != nil {
+		return err
+	}
+	if err := rebuildCollectionClosure(sqlite); err != nil {
+		return err
+	}
+	if err := writeEvent(sqlite, p, "collection.unlinked", "collection", parentID, map[string]string{"parent_collection_id": parentID, "child_collection_id": childID}); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "unlinked collection %s -> %s\n", *parent, *child)
+	return nil
 }
 
 func runExport(rt runtime, args []string, out io.Writer) error {
@@ -745,6 +1043,184 @@ func countRows(sqlite db.SQLite, query string) (int, error) {
 		return 0, fmt.Errorf("parse count: %w", err)
 	}
 	return n, nil
+}
+
+func resolveTask(sqlite db.SQLite, target string) (id string, shortID string, title string, err error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT id,short_id,title FROM tasks WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;", db.Quote(target), db.Quote(target)))
+	if err != nil {
+		return "", "", "", err
+	}
+	if len(rows) == 0 || len(rows[0]) < 3 {
+		return "", "", "", fmt.Errorf("unknown task %s", target)
+	}
+	return rows[0][0], rows[0][1], rows[0][2], nil
+}
+
+func resolveCollection(sqlite db.SQLite, target string) (id string, shortID string, err error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT id,short_id FROM collections WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;", db.Quote(target), db.Quote(target)))
+	if err != nil {
+		return "", "", err
+	}
+	if len(rows) == 0 || len(rows[0]) < 2 {
+		return "", "", fmt.Errorf("unknown collection %s", target)
+	}
+	return rows[0][0], rows[0][1], nil
+}
+
+func userExists(sqlite db.SQLite, userID string) (bool, error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT 1 FROM users WHERE id=%s AND status='active' LIMIT 1;", db.Quote(userID)))
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+func hasOpenBlockers(sqlite db.SQLite, taskID string) (bool, error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT 1 FROM task_dependencies td JOIN tasks b ON b.id=td.blocked_by_task_id WHERE td.task_id=%s AND b.deleted_at IS NULL AND b.status!='completed' LIMIT 1;", db.Quote(taskID)))
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+func hasDependencyPath(sqlite db.SQLite, startTaskID string, targetTaskID string) (bool, error) {
+	query := fmt.Sprintf(`
+WITH RECURSIVE walk(id) AS (
+  SELECT blocked_by_task_id FROM task_dependencies WHERE task_id=%s
+  UNION
+  SELECT td.blocked_by_task_id FROM task_dependencies td JOIN walk w ON td.task_id=w.id
+)
+SELECT 1 FROM walk WHERE id=%s LIMIT 1;`, db.Quote(startTaskID), db.Quote(targetTaskID))
+	rows, err := sqlite.QueryTSV(query)
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+func hasSubtaskPath(sqlite db.SQLite, startTaskID string, targetTaskID string) (bool, error) {
+	query := fmt.Sprintf(`
+WITH RECURSIVE walk(id) AS (
+  SELECT child_task_id FROM task_subtasks WHERE parent_task_id=%s
+  UNION
+  SELECT ts.child_task_id FROM task_subtasks ts JOIN walk w ON ts.parent_task_id=w.id
+)
+SELECT 1 FROM walk WHERE id=%s LIMIT 1;`, db.Quote(startTaskID), db.Quote(targetTaskID))
+	rows, err := sqlite.QueryTSV(query)
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+func hasCollectionPath(sqlite db.SQLite, startCollectionID string, targetCollectionID string) (bool, error) {
+	query := fmt.Sprintf(`
+WITH RECURSIVE walk(id) AS (
+  SELECT child_collection_id FROM collection_links WHERE parent_collection_id=%s
+  UNION
+  SELECT cl.child_collection_id FROM collection_links cl JOIN walk w ON cl.parent_collection_id=w.id
+)
+SELECT 1 FROM walk WHERE id=%s LIMIT 1;`, db.Quote(startCollectionID), db.Quote(targetCollectionID))
+	rows, err := sqlite.QueryTSV(query)
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+func rebuildCollectionClosure(sqlite db.SQLite) error {
+	sql := `
+BEGIN;
+DELETE FROM collection_closure;
+INSERT INTO collection_closure(ancestor_collection_id, descendant_collection_id, depth)
+SELECT id, id, 0 FROM collections WHERE deleted_at IS NULL;
+WITH RECURSIVE paths(ancestor_id, descendant_id, depth) AS (
+  SELECT parent_collection_id, child_collection_id, 1 FROM collection_links
+  UNION ALL
+  SELECT p.ancestor_id, cl.child_collection_id, p.depth + 1
+  FROM paths p
+  JOIN collection_links cl ON cl.parent_collection_id = p.descendant_id
+)
+INSERT OR REPLACE INTO collection_closure(ancestor_collection_id, descendant_collection_id, depth)
+SELECT ancestor_id, descendant_id, MIN(depth)
+FROM paths
+GROUP BY ancestor_id, descendant_id;
+COMMIT;`
+	return sqlite.Exec(sql)
+}
+
+func syncParentsForChild(sqlite db.SQLite, childTaskID string, actorUserID string) error {
+	parents, err := sqlite.QueryTSV(fmt.Sprintf("SELECT parent_task_id FROM task_subtasks WHERE child_task_id=%s;", db.Quote(childTaskID)))
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, r := range parents {
+		if len(r) == 0 {
+			continue
+		}
+		if err := syncParentStatusRecursive(sqlite, r[0], actorUserID, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncParentStatus(sqlite db.SQLite, parentTaskID string, actorUserID string) error {
+	return syncParentStatusRecursive(sqlite, parentTaskID, actorUserID, map[string]bool{})
+}
+
+func syncParentStatusRecursive(sqlite db.SQLite, parentTaskID string, actorUserID string, seen map[string]bool) error {
+	if seen[parentTaskID] {
+		return nil
+	}
+	seen[parentTaskID] = true
+
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT COUNT(*), SUM(CASE WHEN c.status='completed' THEN 1 ELSE 0 END) FROM task_subtasks ts JOIN tasks c ON c.id=ts.child_task_id WHERE ts.parent_task_id=%s AND c.deleted_at IS NULL;", db.Quote(parentTaskID)))
+	if err != nil {
+		return err
+	}
+	if len(rows) > 0 && len(rows[0]) >= 2 {
+		total := parseIntDefault(rows[0][0], 0)
+		done := parseIntDefault(rows[0][1], 0)
+		if total > 0 {
+			if done == total {
+				sql := fmt.Sprintf("UPDATE tasks SET status='completed', completed_at=COALESCE(completed_at,strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now')), updated_by=%s, version=version+1 WHERE id=%s AND deleted_at IS NULL;", db.Quote(actorUserID), db.Quote(parentTaskID))
+				if err := sqlite.Exec(sql); err != nil {
+					return err
+				}
+			} else {
+				sql := fmt.Sprintf("UPDATE tasks SET status='open', completed_at=NULL, updated_by=%s, version=version+1 WHERE id=%s AND deleted_at IS NULL AND status='completed';", db.Quote(actorUserID), db.Quote(parentTaskID))
+				if err := sqlite.Exec(sql); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	parents, err := sqlite.QueryTSV(fmt.Sprintf("SELECT parent_task_id FROM task_subtasks WHERE child_task_id=%s;", db.Quote(parentTaskID)))
+	if err != nil {
+		return err
+	}
+	for _, r := range parents {
+		if len(r) == 0 {
+			continue
+		}
+		if err := syncParentStatusRecursive(sqlite, r[0], actorUserID, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseIntDefault(v string, def int) int {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		return def
+	}
+	return n
 }
 
 func writeEvent(sqlite db.SQLite, p principal, eventType string, aggregateType string, aggregateID string, payload any) error {
