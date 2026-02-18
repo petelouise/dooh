@@ -10,7 +10,6 @@ import (
 
 type Profile struct {
 	DB        string
-	Actor     string
 	Timezone  string
 	Theme     string
 	ExportDir string
@@ -47,7 +46,6 @@ func Load(explicitPath string) (Config, error) {
 func Resolve(cfg Config, profile string) Profile {
 	base := Profile{
 		DB:        "./dooh.db",
-		Actor:     "agent",
 		Timezone:  "America/Los_Angeles",
 		Theme:     "sunset-pop",
 		ExportDir: "./site-data",
@@ -124,8 +122,6 @@ func parseFile(path string) (Config, error) {
 		switch k {
 		case "db":
 			p.DB = v
-		case "actor":
-			p.Actor = v
 		case "timezone":
 			p.Timezone = v
 		case "theme":
@@ -157,9 +153,6 @@ func merge(dst *Config, src Config) {
 func overlay(base Profile, v Profile) Profile {
 	if v.DB != "" {
 		base.DB = v.DB
-	}
-	if v.Actor != "" {
-		base.Actor = v.Actor
 	}
 	if v.Timezone != "" {
 		base.Timezone = v.Timezone

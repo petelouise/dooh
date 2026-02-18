@@ -23,6 +23,8 @@ import (
 type principal struct {
 	UserID     string
 	KeyID      string
+	KeyPrefix  string
+	Actor      string
 	ClientType string
 	Scopes     map[string]bool
 }
@@ -79,6 +81,8 @@ func Run(args []string, stdout io.Writer) error {
 		return runExport(rt, rest[1:], stdout)
 	case "tui":
 		return runTUI(rt, rest[1:], stdout)
+	case "whoami":
+		return runWhoAmI(rt, rest[1:], stdout)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -90,7 +94,7 @@ func Run(args []string, stdout io.Writer) error {
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "dooh (pronounced duo)")
 	_, _ = fmt.Fprintln(w, "global flags: --profile <name> --config <path>")
-	_, _ = fmt.Fprintln(w, "commands: config, db, demo, user, key, task, collection, export, tui, version")
+	_, _ = fmt.Fprintln(w, "commands: config, db, demo, user, key, task, collection, export, tui, whoami, version")
 }
 
 func parseGlobal(args []string) (globalOpts, []string, error) {
@@ -140,7 +144,6 @@ func runConfig(rt runtime, args []string, out io.Writer) error {
 		p := rt.profile
 		_, _ = fmt.Fprintf(out, "profile=%s\n", rt.opts.Profile)
 		_, _ = fmt.Fprintf(out, "db=%s\n", p.DB)
-		_, _ = fmt.Fprintf(out, "actor=%s\n", p.Actor)
 		_, _ = fmt.Fprintf(out, "timezone=%s\n", p.Timezone)
 		_, _ = fmt.Fprintf(out, "theme=%s\n", p.Theme)
 		_, _ = fmt.Fprintf(out, "export_dir=%s\n", p.ExportDir)
@@ -167,18 +170,16 @@ func runConfig(rt runtime, args []string, out io.Writer) error {
 
 [profile.default]
 db = "./dooh.db"
-actor = "agent"
 timezone = "America/Los_Angeles"
 theme = "sunset-pop"
 export_dir = "./site-data"
 api_key_env = "DOOH_API_KEY"
 
 [profile.human]
-actor = "human"
 theme = "paper-fruit"
 
 [profile.agent]
-actor = "agent"
+theme = "midnight-arcade"
 `
 		if err := os.WriteFile(*path, []byte(tpl), 0o644); err != nil {
 			return err
@@ -188,6 +189,24 @@ actor = "agent"
 	default:
 		return fmt.Errorf("unknown config command %q", args[0])
 	}
+}
+
+func runWhoAmI(rt runtime, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dbPath := fs.String("db", "", "sqlite database path")
+	apiKey := fs.String("api-key", "", "api key (required in human mode)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, *apiKey, false)
+	if err != nil {
+		return err
+	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
+	_, _ = fmt.Fprintf(out, "client_type=%s\n", p.ClientType)
+	return nil
 }
 
 func runDB(rt runtime, args []string, out io.Writer) error {
@@ -270,7 +289,7 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 			return err
 		}
 		if count > 0 {
-			if _, err := mustAuth(rt, sqlite, "human", *apiKey, true, "users:admin"); err != nil {
+			if _, err := mustAuth(rt, sqlite, *apiKey, true, "users:admin"); err != nil {
 				return err
 			}
 		} else if !*bootstrap {
@@ -337,7 +356,7 @@ func runKey(rt runtime, args []string, out io.Writer) error {
 			return err
 		}
 		if count > 0 {
-			if _, err := mustAuth(rt, sqlite, "human", *apiKey, true, "keys:admin"); err != nil {
+			if _, err := mustAuth(rt, sqlite, *apiKey, true, "keys:admin"); err != nil {
 				return err
 			}
 		} else if !*bootstrap {
@@ -373,7 +392,7 @@ func runKey(rt runtime, args []string, out io.Writer) error {
 			return errors.New("--prefix is required")
 		}
 		sqlite := db.New(resolveDB(rt, *dbPath))
-		if _, err := mustAuth(rt, sqlite, "human", *apiKey, true, "keys:admin"); err != nil {
+		if _, err := mustAuth(rt, sqlite, *apiKey, true, "keys:admin"); err != nil {
 			return err
 		}
 		sql := fmt.Sprintf("UPDATE api_keys SET revoked_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now') WHERE key_prefix=%s AND revoked_at IS NULL;", db.Quote(*prefix))
@@ -398,7 +417,6 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		title := fs.String("title", "", "title")
 		priority := fs.String("priority", "later", "priority")
 		dbPath := fs.String("db", "", "sqlite database path")
-		actor := fs.String("actor", "", "human|agent")
 		apiKey := fs.String("api-key", "", "api key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -407,10 +425,11 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 			return errors.New("--title is required")
 		}
 		sqlite := db.New(resolveDB(rt, *dbPath))
-		p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+		p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
 		if err != nil {
 			return err
 		}
+		printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 		id, err := idgen.ULIDLike()
 		if err != nil {
 			return err
@@ -473,7 +492,6 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		fs.SetOutput(io.Discard)
 		target := fs.String("id", "", "task id or short id")
 		dbPath := fs.String("db", "", "sqlite database path")
-		actor := fs.String("actor", "", "human|agent")
 		apiKey := fs.String("api-key", "", "api key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -482,10 +500,11 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 			return errors.New("--id is required")
 		}
 		sqlite := db.New(resolveDB(rt, *dbPath))
-		p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:delete")
+		p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:delete")
 		if err != nil {
 			return err
 		}
+		printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 		sql := fmt.Sprintf("UPDATE tasks SET deleted_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'), updated_by=%s, version=version+1 WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL;",
 			db.Quote(p.UserID), db.Quote(*target), db.Quote(*target))
 		if err := sqlite.Exec(sql); err != nil {
@@ -506,7 +525,6 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 	fs.SetOutput(io.Discard)
 	target := fs.String("id", "", "task id or short id")
 	dbPath := fs.String("db", "", "sqlite database path")
-	actor := fs.String("actor", "", "human|agent")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -515,10 +533,11 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 		return errors.New("--id is required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
 	if err != nil {
 		return err
 	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 	taskID, shortID, _, err := resolveTask(sqlite, *target)
 	if err != nil {
 		return err
@@ -563,7 +582,6 @@ func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
 	target := fs.String("id", "", "task id or short id")
 	by := fs.String("by", "", "blocking task id or short id")
 	dbPath := fs.String("db", "", "sqlite database path")
-	actor := fs.String("actor", "", "human|agent")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -572,10 +590,11 @@ func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
 		return errors.New("--id and --by are required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
 	if err != nil {
 		return err
 	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 	taskID, _, _, err := resolveTask(sqlite, *target)
 	if err != nil {
 		return err
@@ -634,7 +653,6 @@ func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 	parent := fs.String("parent", "", "parent task id or short id")
 	child := fs.String("child", "", "child task id or short id")
 	dbPath := fs.String("db", "", "sqlite database path")
-	actor := fs.String("actor", "", "human|agent")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -643,10 +661,11 @@ func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 		return errors.New("--parent and --child are required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
 	if err != nil {
 		return err
 	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 	parentID, _, _, err := resolveTask(sqlite, *parent)
 	if err != nil {
 		return err
@@ -711,7 +730,6 @@ func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 	target := fs.String("id", "", "task id or short id")
 	user := fs.String("user", "", "user id")
 	dbPath := fs.String("db", "", "sqlite database path")
-	actor := fs.String("actor", "", "human|agent")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -720,10 +738,11 @@ func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 		return errors.New("--id and --user are required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "tasks:write")
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
 	if err != nil {
 		return err
 	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 	taskID, _, _, err := resolveTask(sqlite, *target)
 	if err != nil {
 		return err
@@ -769,7 +788,6 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 		kind := fs.String("kind", "project", "kind")
 		color := fs.String("color", "", "hex color")
 		dbPath := fs.String("db", "", "sqlite database path")
-		actor := fs.String("actor", "", "human|agent")
 		apiKey := fs.String("api-key", "", "api key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -778,10 +796,11 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 			return errors.New("--name is required")
 		}
 		sqlite := db.New(resolveDB(rt, *dbPath))
-		p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "collections:write")
+		p, err := mustAuth(rt, sqlite, *apiKey, false, "collections:write")
 		if err != nil {
 			return err
 		}
+		printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 		id, err := idgen.ULIDLike()
 		if err != nil {
 			return err
@@ -844,7 +863,6 @@ func runCollectionLink(rt runtime, args []string, out io.Writer, add bool) error
 	parent := fs.String("parent", "", "parent collection id or short id")
 	child := fs.String("child", "", "child collection id or short id")
 	dbPath := fs.String("db", "", "sqlite database path")
-	actor := fs.String("actor", "", "human|agent")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -853,10 +871,11 @@ func runCollectionLink(rt runtime, args []string, out io.Writer, add bool) error
 		return errors.New("--parent and --child are required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := mustAuth(rt, sqlite, resolveActor(rt, *actor), *apiKey, false, "collections:write")
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "collections:write")
 	if err != nil {
 		return err
 	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
 	parentID, _, err := resolveCollection(sqlite, *parent)
 	if err != nil {
 		return err
@@ -980,23 +999,24 @@ func resolveDB(rt runtime, flagVal string) string {
 	return rt.profile.DB
 }
 
-func resolveActor(rt runtime, flagVal string) string {
-	if strings.TrimSpace(flagVal) != "" {
-		return flagVal
-	}
-	return ""
+func printWriteContext(out io.Writer, rt runtime, dbPath string, p principal) {
+	_, _ = fmt.Fprintf(out, "%s profile=%s mode=%s user=%s key=%s db=%s\n",
+		style("context", "2"),
+		rt.opts.Profile,
+		p.Actor,
+		p.UserID,
+		p.KeyPrefix,
+		dbPath,
+	)
 }
 
-func mustAuth(rt runtime, sqlite db.SQLite, actor string, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
+func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
 	var p principal
 	mode := strings.TrimSpace(os.Getenv("DOOH_MODE"))
 	if mode != "human" && mode != "agent" {
 		return p, errors.New("DOOH_MODE must be set to human or agent for mutating commands")
 	}
-	if actor != "" && actor != mode {
-		return p, fmt.Errorf("--actor %s does not match DOOH_MODE=%s", actor, mode)
-	}
-	actor = mode
+	actor := mode
 	key := strings.TrimSpace(keyFromFlag)
 	if actor == "agent" {
 		if key != "" {
@@ -1021,14 +1041,14 @@ func mustAuth(rt runtime, sqlite db.SQLite, actor string, keyFromFlag string, re
 		}
 	}
 	hash := auth.HashAPIKey(key)
-	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.scopes,k.client_type FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
 	if err != nil {
 		return p, err
 	}
-	if len(rows) == 0 || len(rows[0]) < 4 {
+	if len(rows) == 0 || len(rows[0]) < 5 {
 		return p, errors.New("invalid api key")
 	}
-	p = principal{UserID: rows[0][1], KeyID: rows[0][0], ClientType: rows[0][3], Scopes: parseScopes(rows[0][2])}
+	p = principal{UserID: rows[0][1], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
 
 	expectedClient := actor + "_cli"
 	if p.ClientType != expectedClient && p.ClientType != "system" {

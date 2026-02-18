@@ -26,20 +26,20 @@ func TestMustAuthRequiresModeAndSourceRules(t *testing.T) {
 	}()
 
 	_ = os.Unsetenv("DOOH_MODE")
-	_, err := mustAuth(rt, sqlite, "", "dooh_human_key", false, "tasks:write")
+	_, err := mustAuth(rt, sqlite, "dooh_human_key", false, "tasks:write")
 	if err == nil {
 		t.Fatalf("expected DOOH_MODE requirement error")
 	}
 
 	_ = os.Setenv("DOOH_MODE", "human")
-	_, err = mustAuth(rt, sqlite, "", "", false, "tasks:write")
+	_, err = mustAuth(rt, sqlite, "", false, "tasks:write")
 	if err == nil {
 		t.Fatalf("expected human key flag requirement error")
 	}
 
 	_ = os.Setenv("DOOH_MODE", "agent")
 	_ = os.Setenv("DOOH_API_KEY", "dooh_agent_key")
-	_, err = mustAuth(rt, sqlite, "", "manual_key_not_allowed", false, "tasks:write")
+	_, err = mustAuth(rt, sqlite, "manual_key_not_allowed", false, "tasks:write")
 	if err == nil {
 		t.Fatalf("expected agent key source restriction")
 	}

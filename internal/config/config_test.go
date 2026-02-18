@@ -11,11 +11,9 @@ func TestLoadAndResolveProfiles(t *testing.T) {
 	cfgPath := filepath.Join(d, "config.toml")
 	content := `[profile.default]
 db = "./x.db"
-actor = "agent"
 theme = "sunset-pop"
 
 [profile.human]
-actor = "human"
 theme = "paper-fruit"
 `
 	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
@@ -27,9 +25,6 @@ theme = "paper-fruit"
 		t.Fatal(err)
 	}
 	p := Resolve(cfg, "human")
-	if p.Actor != "human" {
-		t.Fatalf("expected human actor, got %s", p.Actor)
-	}
 	if p.DB != "./x.db" {
 		t.Fatalf("expected db override, got %s", p.DB)
 	}
