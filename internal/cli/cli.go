@@ -966,30 +966,36 @@ func resolveActor(rt runtime, flagVal string) string {
 	if strings.TrimSpace(flagVal) != "" {
 		return flagVal
 	}
-	if v := strings.TrimSpace(os.Getenv("DOOH_ACTOR")); v != "" {
-		return v
-	}
-	return rt.profile.Actor
+	return ""
 }
 
 func mustAuth(rt runtime, sqlite db.SQLite, actor string, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
 	var p principal
-	if actor != "human" && actor != "agent" {
-		return p, errors.New("--actor must be human or agent")
+	mode := strings.TrimSpace(os.Getenv("DOOH_MODE"))
+	if mode != "human" && mode != "agent" {
+		return p, errors.New("DOOH_MODE must be set to human or agent for mutating commands")
 	}
+	if actor != "" && actor != mode {
+		return p, fmt.Errorf("--actor %s does not match DOOH_MODE=%s", actor, mode)
+	}
+	actor = mode
 	key := strings.TrimSpace(keyFromFlag)
-	if key == "" {
-		if actor == "human" {
-			return p, errors.New("human actor requires --api-key (env fallback disabled to avoid accidental agent impersonation)")
+	if actor == "agent" {
+		if key != "" {
+			return p, errors.New("agent mode requires API key from environment, not --api-key")
 		}
 		envKey := rt.profile.APIKeyEnv
 		if strings.TrimSpace(envKey) == "" {
 			envKey = "DOOH_API_KEY"
 		}
 		key = strings.TrimSpace(os.Getenv(envKey))
-	}
-	if key == "" {
-		return p, errors.New("missing api key")
+		if key == "" {
+			return p, fmt.Errorf("missing api key in %s for agent mode", envKey)
+		}
+	} else {
+		if key == "" {
+			return p, errors.New("human mode requires --api-key")
+		}
 	}
 	if requireHumanTTY && actor == "human" {
 		if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
