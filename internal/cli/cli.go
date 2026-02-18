@@ -298,9 +298,12 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		_, _ = fmt.Fprintln(out, style("NAME                 STATUS    CREATED                  USER_ID", "1"))
+		_, _ = fmt.Fprintln(out, strings.Repeat("-", 92))
 		for _, r := range rows {
 			if len(r) >= 4 {
-				_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", r[0], r[1], r[2], r[3])
+				status := colorizeStatus(r[2])
+				_, _ = fmt.Fprintf(out, "%-20s %-9s %-24s %s\n", truncate(r[1], 20), status, truncate(r[3], 24), r[0])
 			}
 		}
 		return nil
@@ -438,9 +441,17 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		_, _ = fmt.Fprintln(out, style("TITLE                                     STATUS     PRIORITY UPDATED                  TASK_ID", "1"))
+		_, _ = fmt.Fprintln(out, strings.Repeat("-", 100))
 		for _, r := range rows {
 			if len(r) >= 5 {
-				_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", r[0], r[1], r[2], r[3], r[4])
+				_, _ = fmt.Fprintf(out, "%-40s %-10s %-8s %-24s %s\n",
+					truncate(r[0], 40),
+					colorizeStatus(r[1]),
+					colorizePriority(r[2]),
+					truncate(r[3], 24),
+					r[4],
+				)
 			}
 		}
 		return nil
@@ -805,9 +816,17 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		_, _ = fmt.Fprintln(out, style("NAME                 KIND       COLOR      UPDATED                  COLLECTION_ID", "1"))
+		_, _ = fmt.Fprintln(out, strings.Repeat("-", 92))
 		for _, r := range rows {
 			if len(r) >= 5 {
-				_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", r[0], r[1], r[2], r[3], r[4])
+				_, _ = fmt.Fprintf(out, "%-20s %-10s %-10s %-24s %s\n",
+					truncate(r[1], 20),
+					colorizeKind(r[2]),
+					style(truncate(r[3], 10), "38;5;45"),
+					truncate(r[4], 24),
+					r[0],
+				)
 			}
 		}
 		return nil
@@ -1227,6 +1246,69 @@ func parseIntDefault(v string, def int) int {
 		return def
 	}
 	return n
+}
+
+func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	if n <= 1 {
+		return s[:n]
+	}
+	return s[:n-1] + "…"
+}
+
+func style(text string, code string) string {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return text
+	}
+	return "\x1b[" + code + "m" + text + "\x1b[0m"
+}
+
+func colorizeStatus(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "completed":
+		return style("completed", "38;5;78")
+	case "archived":
+		return style("archived", "38;5;179")
+	case "open":
+		return style("open", "38;5;81")
+	default:
+		return v
+	}
+}
+
+func colorizePriority(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "now":
+		return style("now", "38;5;203")
+	case "soon":
+		return style("soon", "38;5;221")
+	case "later":
+		return style("later", "38;5;111")
+	default:
+		return v
+	}
+}
+
+func colorizeKind(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "project":
+		return style("project", "38;5;75")
+	case "goal":
+		return style("goal", "38;5;220")
+	case "tag":
+		return style("tag", "38;5;43")
+	case "class":
+		return style("class", "38;5;119")
+	case "area":
+		return style("area", "38;5;209")
+	default:
+		return v
+	}
 }
 
 func writeEvent(sqlite db.SQLite, p principal, eventType string, aggregateType string, aggregateID string, payload any) error {
