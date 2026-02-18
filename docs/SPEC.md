@@ -17,7 +17,6 @@
 - Required runtime mode: `DOOH_MODE=human|agent` for mutating commands.
 - `human` mode requires explicit command key (`--api-key`) and does not fallback to env.
 - `agent` mode requires environment key (`DOOH_API_KEY` or configured `api_key_env`) and rejects command key flag.
-- If `--actor` is provided, it must match `DOOH_MODE`.
 
 ## Config profile separation
 - Files:

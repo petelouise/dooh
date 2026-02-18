@@ -60,6 +60,12 @@ For all mutating commands:
 - `human` mode requires `--api-key` on each write command.
 - `agent` mode requires key from env (`DOOH_API_KEY`), and rejects `--api-key`.
 
+Inspect current execution identity:
+```bash
+DOOH_MODE=human go run ./cmd/dooh whoami --api-key "<HUMAN_KEY>"
+DOOH_MODE=agent DOOH_API_KEY="<AGENT_KEY>" go run ./cmd/dooh whoami
+```
+
 ## Fast demo seed + colorful dashboard
 ```bash
 export GOCACHE="$(pwd)/.cache/go-build"
