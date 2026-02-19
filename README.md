@@ -72,7 +72,21 @@ export GOCACHE="$(pwd)/.cache/go-build"
 go run ./cmd/dooh db init --db ./dooh.db
 go run ./cmd/dooh demo seed --db ./dooh.db
 go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12
+go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --static
 ```
+
+TUI controls:
+- `up/down` or `j/k`: move selection
+- `/`: edit filter (`Enter` apply, `Esc` cancel)
+- `s`: cycle status filter
+- `p`: cycle priority filter
+- `c`: clear filter
+- `q`: quit
+
+Timestamps in TUI use natural format:
+- `today 12:35`
+- `yesterday 22:00`
+- `03 Feb 2026 05:21`
 
 ## Theme presets
 ```bash
