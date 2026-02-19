@@ -31,7 +31,7 @@ type principal struct {
 	Scopes     map[string]bool
 }
 
-var errNoAuthContext = errors.New("No authenticated user context. Set DOOH_MODE and provide a valid key (human via --api-key or `dooh login human`, agent via env key).")
+var errNoAuthContext = errors.New("No authenticated user context. Provide a valid key (via --api-key, stored login key, or env key).")
 
 type globalOpts struct {
 	Profile    string
@@ -294,7 +294,7 @@ func runSetup(rt runtime, args []string, out io.Writer) error {
 		_, _ = fmt.Fprintf(out, "setup complete: db=%s users=%d collections=%d tasks=%d\n", dbResolved, res.Users, res.Collections, res.Tasks)
 		_, _ = fmt.Fprintf(out, "stored human key %s in %s (profile=%s)\n", humanPrefix, humanPath, *humanProfile)
 		_, _ = fmt.Fprintf(out, "stored agent key %s in %s (profile=%s)\n", agentPrefix, agentPath, *agentProfile)
-		_, _ = fmt.Fprintf(out, "next: eval \"$(dooh --profile %s env --mode human)\" && dooh --profile %s tui\n", *humanProfile, *humanProfile)
+		_, _ = fmt.Fprintf(out, "next: DOOH_MODE=human dooh --profile %s whoami && dooh --profile %s tui\n", *humanProfile, *humanProfile)
 		return nil
 	default:
 		return fmt.Errorf("unknown setup command %q", args[0])
@@ -302,33 +302,29 @@ func runSetup(rt runtime, args []string, out io.Writer) error {
 }
 
 func runLogin(rt runtime, args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return errors.New("usage: login <human|agent> --api-key <key> [--db <path>]")
-	}
-	actor := strings.TrimSpace(args[0])
-	if actor != "human" && actor != "agent" {
-		return errors.New("usage: login <human|agent> --api-key <key> [--db <path>]")
-	}
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key to store for profile")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("usage: login --api-key <key> [--db <path>]")
 	}
 	if strings.TrimSpace(*apiKey) == "" {
 		return errors.New("--api-key is required")
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
-	p, err := principalFromKey(sqlite, strings.TrimSpace(*apiKey), actor)
+	p, err := principalFromKey(sqlite, strings.TrimSpace(*apiKey))
 	if err != nil {
 		return errNoAuthContext
 	}
-	path, err := writeStoredKey(rt.opts.Profile, actor, strings.TrimSpace(*apiKey))
+	path, err := writeStoredKey(rt.opts.Profile, p.Actor, strings.TrimSpace(*apiKey))
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "stored %s key for profile %s in %s\n", actor, rt.opts.Profile, path)
+	_, _ = fmt.Fprintf(out, "stored %s key for profile %s in %s\n", displayActor(p.Actor), rt.opts.Profile, path)
 	_, _ = fmt.Fprintf(out, "user=%s key=%s\n", p.UserID, p.KeyPrefix)
 	return nil
 }
@@ -336,14 +332,14 @@ func runLogin(rt runtime, args []string, out io.Writer) error {
 func runEnv(rt runtime, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	mode := fs.String("mode", "", "actor mode (human|agent)")
+	mode := fs.String("mode", "", "actor mode (human|ai)")
 	dbPath := fs.String("db", "", "sqlite database path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	selectedMode := strings.TrimSpace(*mode)
+	selectedMode := normalizeActor(strings.TrimSpace(*mode))
 	if selectedMode == "" {
-		selectedMode = strings.TrimSpace(os.Getenv("DOOH_MODE"))
+		selectedMode = normalizeActor(strings.TrimSpace(os.Getenv("DOOH_MODE")))
 	}
 	if selectedMode == "" {
 		if rt.opts.Profile == "agent" {
@@ -353,11 +349,11 @@ func runEnv(rt runtime, args []string, out io.Writer) error {
 		}
 	}
 	if selectedMode != "human" && selectedMode != "agent" {
-		return errors.New("--mode must be human or agent")
+		return errors.New("--mode must be human or ai")
 	}
 	_, _ = fmt.Fprintf(out, "export DOOH_PROFILE=%s\n", shellQuote(rt.opts.Profile))
 	_, _ = fmt.Fprintf(out, "export DOOH_DB=%s\n", shellQuote(resolveDB(rt, *dbPath)))
-	_, _ = fmt.Fprintf(out, "export DOOH_MODE=%s\n", shellQuote(selectedMode))
+	_, _ = fmt.Fprintf(out, "export DOOH_MODE=%s\n", shellQuote(displayActor(selectedMode)))
 	apiEnv := rt.profile.APIKeyEnv
 	if strings.TrimSpace(apiEnv) == "" {
 		apiEnv = "DOOH_API_KEY"
@@ -368,7 +364,7 @@ func runEnv(rt runtime, args []string, out io.Writer) error {
 			return err
 		}
 		if k == "" {
-			_, _ = fmt.Fprintf(out, "# no stored agent key for profile %s (run: dooh --profile %s login agent --api-key <key>)\n", rt.opts.Profile, rt.opts.Profile)
+			_, _ = fmt.Fprintf(out, "# no stored ai key for profile %s (run: dooh --profile %s login --api-key <key>)\n", rt.opts.Profile, rt.opts.Profile)
 		} else {
 			_, _ = fmt.Fprintf(out, "export %s=%s\n", apiEnv, shellQuote(k))
 		}
@@ -1125,7 +1121,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	identity := tui.Identity{Actor: p.Actor, UserID: p.UserID, UserName: p.UserName}
+	identity := tui.Identity{Actor: displayActor(p.Actor), UserID: p.UserID, UserName: p.UserName}
 	if *listThemes {
 		for _, item := range catalog.Themes {
 			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\n", item.ID, item.Name, item.Description)
@@ -1193,7 +1189,7 @@ func printWriteContext(out io.Writer, rt runtime, dbPath string, p principal) {
 	_, _ = fmt.Fprintf(out, "%s profile=%s mode=%s user=%s key=%s db=%s\n",
 		style("context", "2"),
 		rt.opts.Profile,
-		p.Actor,
+		displayActor(p.Actor),
 		p.UserID,
 		p.KeyPrefix,
 		dbPath,
@@ -1273,6 +1269,7 @@ func authStoreDir() (string, error) {
 }
 
 func keyFilePath(profile string, actor string) (string, error) {
+	actor = normalizeActor(actor)
 	if actor != "human" && actor != "agent" {
 		return "", fmt.Errorf("invalid actor %q", actor)
 	}
@@ -1320,7 +1317,7 @@ func shellQuote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
-func principalFromKey(sqlite db.SQLite, key string, actor string) (principal, error) {
+func principalFromKey(sqlite db.SQLite, key string) (principal, error) {
 	var p principal
 	hash := auth.HashAPIKey(key)
 	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type,u.name FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
@@ -1330,35 +1327,49 @@ func principalFromKey(sqlite db.SQLite, key string, actor string) (principal, er
 	if len(rows) == 0 || len(rows[0]) < 6 {
 		return p, errNoAuthContext
 	}
-	p = principal{UserID: rows[0][1], UserName: rows[0][5], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
-	expectedClient := actor + "_cli"
-	if p.ClientType != expectedClient && p.ClientType != "system" {
-		return principal{}, fmt.Errorf("key client_type %s cannot be used as %s", p.ClientType, actor)
+	clientType := strings.TrimSpace(rows[0][4])
+	actor, ok := actorFromClientType(clientType)
+	if !ok {
+		return principal{}, fmt.Errorf("key client_type %s is not interactive", clientType)
 	}
+	p = principal{UserID: rows[0][1], UserName: rows[0][5], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: clientType, Scopes: parseScopes(rows[0][3])}
 	return p, nil
 }
 
 func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
 	var p principal
-	mode := strings.TrimSpace(os.Getenv("DOOH_MODE"))
-	if mode != "human" && mode != "agent" {
-		return p, errNoAuthContext
-	}
-	actor := mode
 	key := strings.TrimSpace(keyFromFlag)
-	if actor == "agent" {
-		if key != "" {
-			return p, errNoAuthContext
+	if key != "" {
+		p, err := principalFromKey(sqlite, key)
+		if err != nil {
+			return principal{}, err
 		}
+		for _, need := range neededScopes {
+			if !p.Scopes[need] {
+				return principal{}, fmt.Errorf("missing required scope %q", need)
+			}
+		}
+		return p, nil
+	}
+
+	mode := normalizeActor(strings.TrimSpace(os.Getenv("DOOH_MODE")))
+	if mode == "agent" {
 		envKey := rt.profile.APIKeyEnv
 		if strings.TrimSpace(envKey) == "" {
 			envKey = "DOOH_API_KEY"
 		}
 		key = strings.TrimSpace(os.Getenv(envKey))
 		if key == "" {
+			stored, _, err := readStoredKey(rt.opts.Profile, "agent")
+			if err != nil {
+				return p, err
+			}
+			key = stored
+		}
+		if key == "" {
 			return p, errNoAuthContext
 		}
-	} else {
+	} else if mode == "human" {
 		if key == "" {
 			stored, _, err := readStoredKey(rt.opts.Profile, "human")
 			if err != nil {
@@ -1369,15 +1380,38 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 		if key == "" {
 			return p, errNoAuthContext
 		}
+	} else {
+		envKey := rt.profile.APIKeyEnv
+		if strings.TrimSpace(envKey) == "" {
+			envKey = "DOOH_API_KEY"
+		}
+		key = strings.TrimSpace(os.Getenv(envKey))
+		if key == "" {
+			if stored, _, err := readStoredKey(rt.opts.Profile, "human"); err != nil {
+				return p, err
+			} else if stored != "" {
+				key = stored
+			}
+		}
+		if key == "" {
+			if stored, _, err := readStoredKey(rt.opts.Profile, "agent"); err != nil {
+				return p, err
+			} else if stored != "" {
+				key = stored
+			}
+		}
+		if key == "" {
+			return p, errNoAuthContext
+		}
 	}
-	if requireHumanTTY && actor == "human" {
+	p, err := principalFromKey(sqlite, key)
+	if err != nil {
+		return principal{}, err
+	}
+	if requireHumanTTY && p.Actor == "human" {
 		if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
 			return p, errors.New("human actor requires interactive terminal")
 		}
-	}
-	p, err := principalFromKey(sqlite, key, actor)
-	if err != nil {
-		return principal{}, err
 	}
 	for _, need := range neededScopes {
 		if !p.Scopes[need] {
@@ -1385,6 +1419,37 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 		}
 	}
 	return p, nil
+}
+
+func normalizeActor(v string) string {
+	switch strings.TrimSpace(strings.ToLower(v)) {
+	case "ai":
+		return "agent"
+	case "human":
+		return "human"
+	case "agent":
+		return "agent"
+	default:
+		return ""
+	}
+}
+
+func displayActor(v string) string {
+	if normalizeActor(v) == "agent" {
+		return "ai"
+	}
+	return "human"
+}
+
+func actorFromClientType(clientType string) (string, bool) {
+	switch strings.TrimSpace(clientType) {
+	case "human_cli":
+		return "human", true
+	case "agent_cli":
+		return "agent", true
+	default:
+		return "", false
+	}
 }
 
 func parseScopes(v string) map[string]bool {

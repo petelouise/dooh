@@ -21,12 +21,11 @@ export GOCACHE="$(pwd)/.cache/go-build"
 
 ## Streamlined quick start
 ```bash
-# one command bootstrap: db + seed + human/agent demo keys in profile auth store
+# one command bootstrap: db + seed + human/ai demo keys in profile auth store
 go run ./cmd/dooh setup demo --db ./dooh.db
 
-# load human context for shell and run without repeated --db/--api-key
-eval "$(go run ./cmd/dooh --profile human env --mode human)"
-go run ./cmd/dooh --profile human whoami
+# run directly (stored login keys and explicit --api-key both work)
+DOOH_MODE=human go run ./cmd/dooh --profile human whoami
 go run ./cmd/dooh --profile human tui --theme midnight-arcade
 ```
 
@@ -67,26 +66,26 @@ go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
 ```
 
 For all data commands (read and write):
-- set `DOOH_MODE=human` or `DOOH_MODE=agent`.
-- `human` mode uses `--api-key` or a stored key from `dooh login human`.
-- `agent` mode requires key from env (`DOOH_API_KEY`), and rejects `--api-key`.
+- explicit `--api-key` is enough; actor is inferred from key type.
+- without `--api-key`, mode/key source is resolved from `DOOH_MODE` + stored/env keys.
+- `DOOH_MODE` accepts `human`, `ai`, or legacy `agent`.
 
 Store keys once per profile:
 ```bash
-go run ./cmd/dooh --profile human login human --db ./dooh.db --api-key "<HUMAN_KEY>"
-go run ./cmd/dooh --profile agent login agent --db ./dooh.db --api-key "<AGENT_KEY>"
+go run ./cmd/dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
+go run ./cmd/dooh --profile agent login --db ./dooh.db --api-key "<AGENT_KEY>"
 ```
 
 Emit shell exports for profile context:
 ```bash
 eval "$(go run ./cmd/dooh --profile human env --mode human)"
-eval "$(go run ./cmd/dooh --profile agent env --mode agent)"
+eval "$(go run ./cmd/dooh --profile agent env --mode ai)"
 ```
 
 Inspect current execution identity:
 ```bash
 DOOH_MODE=human go run ./cmd/dooh whoami --api-key "<HUMAN_KEY>"
-DOOH_MODE=agent DOOH_API_KEY="<AGENT_KEY>" go run ./cmd/dooh whoami
+DOOH_MODE=ai DOOH_API_KEY="<AGENT_KEY>" go run ./cmd/dooh whoami
 ```
 
 ## Fast demo seed + colorful dashboard
@@ -190,8 +189,8 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
 
 ## Auth safety behavior
 - all runtime data commands require authenticated user context (no anonymous mode).
-- `DOOH_MODE` is required and must be `human` or `agent`.
-- `human` mode accepts explicit `--api-key` and otherwise reads profile-scoped stored login key.
-- `agent` mode requires env key (`DOOH_API_KEY` or profile `api_key_env`) and rejects `--api-key`.
-- Key `client_type` must match actor (`human_cli` or `agent_cli`) unless key type is `system`.
+- explicit `--api-key` takes priority and determines actor from key `client_type`.
+- if no explicit key is provided, auth resolves from `DOOH_MODE` + stored/env keys.
+- `DOOH_MODE` supports `human`, `ai`, and legacy `agent`.
+- Key `client_type` must be interactive (`human_cli` or `agent_cli`) for runtime commands.
 - profile-scoped keys are written to `~/.config/dooh/auth/<profile>.<actor>.key` with `0600` permissions.

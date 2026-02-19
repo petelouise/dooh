@@ -11,7 +11,7 @@ import (
 	"dooh/internal/db"
 )
 
-func TestMustAuthRequiresModeAndSourceRules(t *testing.T) {
+func TestMustAuthInfersActorFromExplicitKeyAndRespectsEnvSourceRules(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 not available")
 	}
@@ -26,9 +26,12 @@ func TestMustAuthRequiresModeAndSourceRules(t *testing.T) {
 	}()
 
 	_ = os.Unsetenv("DOOH_MODE")
-	_, err := mustAuth(rt, sqlite, "dooh_human_key", false, "tasks:write")
-	if err == nil {
-		t.Fatalf("expected DOOH_MODE requirement error")
+	p, err := mustAuth(rt, sqlite, "dooh_human_key", false, "tasks:write")
+	if err != nil {
+		t.Fatalf("expected explicit key auth without DOOH_MODE, got %v", err)
+	}
+	if p.Actor != "human" {
+		t.Fatalf("expected human actor from key, got %s", p.Actor)
 	}
 
 	_ = os.Setenv("DOOH_MODE", "human")
@@ -37,11 +40,21 @@ func TestMustAuthRequiresModeAndSourceRules(t *testing.T) {
 		t.Fatalf("expected human key flag requirement error")
 	}
 
-	_ = os.Setenv("DOOH_MODE", "agent")
+	_ = os.Setenv("DOOH_MODE", "ai")
 	_ = os.Setenv("DOOH_API_KEY", "dooh_agent_key")
-	_, err = mustAuth(rt, sqlite, "manual_key_not_allowed", false, "tasks:write")
-	if err == nil {
-		t.Fatalf("expected agent key source restriction")
+	p, err = mustAuth(rt, sqlite, "", false, "tasks:write")
+	if err != nil {
+		t.Fatalf("expected ai env key auth, got %v", err)
+	}
+	if p.Actor != "agent" {
+		t.Fatalf("expected agent actor from env key, got %s", p.Actor)
+	}
+	p, err = mustAuth(rt, sqlite, "dooh_human_key", false, "tasks:write")
+	if err != nil {
+		t.Fatalf("expected explicit key to override mode hint, got %v", err)
+	}
+	if p.Actor != "human" {
+		t.Fatalf("expected human actor from explicit key, got %s", p.Actor)
 	}
 }
 

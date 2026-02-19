@@ -32,7 +32,7 @@ func TestLoginHumanEnablesStoredKeyFallback(t *testing.T) {
 	_ = os.Setenv("DOOH_MODE", "human")
 
 	var out bytes.Buffer
-	if err := Run([]string{"--profile", "human", "login", "human", "--db", dbPath, "--api-key", "dooh_human_key"}, &out); err != nil {
+	if err := Run([]string{"--profile", "human", "login", "--db", dbPath, "--api-key", "dooh_human_key"}, &out); err != nil {
 		t.Fatalf("login should pass: %v", err)
 	}
 	out.Reset()
@@ -58,15 +58,15 @@ func TestEnvAgentPrintsStoredAgentKey(t *testing.T) {
 	_ = os.Setenv("HOME", home)
 
 	var out bytes.Buffer
-	if err := Run([]string{"--profile", "agent", "login", "agent", "--db", dbPath, "--api-key", "dooh_agent_key"}, &out); err != nil {
+	if err := Run([]string{"--profile", "agent", "login", "--db", dbPath, "--api-key", "dooh_agent_key"}, &out); err != nil {
 		t.Fatalf("agent login should pass: %v", err)
 	}
 	out.Reset()
-	if err := Run([]string{"--profile", "agent", "env", "--mode", "agent", "--db", dbPath}, &out); err != nil {
+	if err := Run([]string{"--profile", "agent", "env", "--mode", "ai", "--db", dbPath}, &out); err != nil {
 		t.Fatalf("env should pass: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "export DOOH_MODE='agent'") {
+	if !strings.Contains(got, "export DOOH_MODE='ai'") {
 		t.Fatalf("expected agent mode export, got: %s", got)
 	}
 	if !strings.Contains(got, "export DOOH_API_KEY='dooh_agent_key'") {
