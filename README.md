@@ -100,6 +100,7 @@ View headers are context-aware:
 TUI is currently read-focused:
 - no command bar workflow is required
 - filters are always visible at the top: text/status/priority/tag/assignee/scope
+- `today` view defaults to tasks assigned to the current user context (`DOOH_TUI_USER` or `DOOH_MODE` hint), with fallback to all today tasks if no match
 
 Task rows use status icons instead of a status text column:
 - `○` open
@@ -109,7 +110,7 @@ Task rows use status icons instead of a status text column:
 - `!` overdue open task (highlighted)
 
 Task table columns:
-- `status icon`, `selection`, `due flag`, `title`, `priority`, `scheduled`
+- `selection`, `status icon`, `assignee initials`, `title (with due/overdue marker)`, `priority`, `scheduled`
 - `updated` is shown in the bottom status/detail bar
 
 Expanded task details are split by collection type:

@@ -44,29 +44,31 @@ type progressRow struct {
 }
 
 type palette struct {
-	Accent  int
-	Open    int
-	Done    int
-	Archive int
-	Muted   int
-	Warn    int
+	Accent   int
+	BgAccent int
+	Open     int
+	Done     int
+	Archive  int
+	Muted    int
+	Warn     int
 }
 
 type model struct {
-	sqlite         db.SQLite
-	themes         []Theme
-	themeIndex     int
-	filter         string
-	statusFilter   string
-	priorityFilter string
-	tagFilter      string
-	assigneeFilter string
-	selected       int
-	limit          int
-	loc            *time.Location
-	plain          bool
-	view           string
-	rng            *rand.Rand
+	sqlite          db.SQLite
+	themes          []Theme
+	themeIndex      int
+	filter          string
+	statusFilter    string
+	priorityFilter  string
+	tagFilter       string
+	assigneeFilter  string
+	selected        int
+	limit           int
+	loc             *time.Location
+	plain           bool
+	view            string
+	rng             *rand.Rand
+	currentUserHint string
 
 	scopeKind  string
 	scopeID    string
@@ -154,18 +156,30 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		loc = time.Local
 	}
 	seed := time.Now().UnixNano()
+	userHint := strings.TrimSpace(os.Getenv("DOOH_TUI_USER"))
+	if userHint == "" {
+		switch strings.TrimSpace(strings.ToLower(os.Getenv("DOOH_MODE"))) {
+		case "human":
+			userHint = "human"
+		case "agent":
+			userHint = "agent"
+		default:
+			userHint = strings.TrimSpace(os.Getenv("USER"))
+		}
+	}
 	return model{
-		sqlite:         sqlite,
-		themes:         catalog.Themes,
-		themeIndex:     idx,
-		filter:         strings.TrimSpace(filter),
-		statusFilter:   "open",
-		priorityFilter: "all",
-		limit:          limit,
-		loc:            loc,
-		plain:          plain,
-		view:           "tasks",
-		rng:            rand.New(rand.NewSource(seed)),
+		sqlite:          sqlite,
+		themes:          catalog.Themes,
+		themeIndex:      idx,
+		filter:          strings.TrimSpace(filter),
+		statusFilter:    "open",
+		priorityFilter:  "all",
+		limit:           limit,
+		loc:             loc,
+		plain:           plain,
+		view:            "tasks",
+		rng:             rand.New(rand.NewSource(seed)),
+		currentUserHint: strings.ToLower(userHint),
 	}
 }
 
@@ -366,9 +380,6 @@ func (m *model) render(cols int, lines int) (string, error) {
 	if bodyBudget < 4 {
 		bodyBudget = 4
 	}
-	if bodyBudget > m.limit {
-		bodyBudget = m.limit
-	}
 
 	scope := "all"
 	if m.scopeKind != "" {
@@ -423,11 +434,12 @@ func (m *model) renderHeader(cols int, p palette) string {
 	priorityW := 8
 	scheduledW := 17
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW)
+	assigneeW := 3
+	titleW := cols - (1 + 1 + 1 + 1 + separatorW + assigneeW + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
 	}
-	h := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s", " ", " ", "D", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled")
+	h := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s", ">", "S", assigneeW, "Asg", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled")
 	return m.paintMuted(clampLine(h, cols), p)
 }
 
@@ -438,9 +450,6 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
 		bodyBudget = 4
-	}
-	if bodyBudget > m.limit {
-		bodyBudget = m.limit
 	}
 	switch m.view {
 	case "projects":
@@ -494,10 +503,19 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 			return nil, "", "", err
 		}
 		todayRows := make([]row, 0, len(rows))
+		allToday := make([]row, 0, len(rows))
 		for _, r := range rows {
-			if isTodayScheduled(r.Scheduled, m.loc, now) {
-				todayRows = append(todayRows, r)
+			if !isTodayScheduled(r.Scheduled, m.loc, now) {
+				continue
 			}
+			allToday = append(allToday, r)
+			if m.scopeKind != "assignee" && strings.TrimSpace(m.assigneeFilter) == "" && !m.assignedToCurrent(r) {
+				continue
+			}
+			todayRows = append(todayRows, r)
+		}
+		if len(todayRows) == 0 && len(allToday) > 0 {
+			todayRows = allToday
 		}
 		if len(todayRows) == 0 {
 			m.selected = 0
@@ -532,7 +550,8 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 	priorityW := 8
 	scheduledW := 17
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW)
+	assigneeW := 3
+	titleW := cols - (1 + 1 + 1 + 1 + separatorW + assigneeW + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
 	}
@@ -559,18 +578,19 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 			mark = ">"
 		}
 		icon := statusIcon(r.Status)
-		dueFlag := dueFlagIcon(r, now, m.loc)
-		rowLine := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s",
-			icon,
+		title := r.Title + dueSuffix(r, now, m.loc)
+		asg := assigneeInitials(r.Assignees)
+		rowLine := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s",
 			mark,
-			dueFlag,
-			titleW, clampLine(r.Title, titleW),
+			icon,
+			assigneeW, asg,
+			titleW, clampLine(title, titleW),
 			priorityW, r.Priority,
 			scheduledW, NaturalDate(r.Scheduled, m.loc, now),
 		)
 		line := clampLine(rowLine, cols)
 		line = m.paintStatusMarker(line, icon, r.Status, p)
-		line = m.paintDueMarker(line, dueFlag, r, now, p)
+		line = m.paintDueSuffix(line, title, r, now, p)
 		if i == m.selected {
 			line = m.paintSelected(line, p)
 		}
@@ -1011,6 +1031,38 @@ func fallbackDash(v string) string {
 	return strings.TrimSpace(v)
 }
 
+func assigneeInitials(names string) string {
+	parts := strings.Split(strings.TrimSpace(names), ",")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return "--"
+	}
+	words := strings.Fields(strings.TrimSpace(parts[0]))
+	if len(words) == 0 {
+		return "--"
+	}
+	if len(words) == 1 {
+		r := []rune(words[0])
+		if len(r) == 0 {
+			return "--"
+		}
+		if len(r) == 1 {
+			return strings.ToUpper(string(r[0])) + "-"
+		}
+		return strings.ToUpper(string(r[0]) + string(r[1]))
+	}
+	a := []rune(words[0])
+	b := []rune(words[1])
+	return strings.ToUpper(string(a[0]) + string(b[0]))
+}
+
+func (m *model) assignedToCurrent(r row) bool {
+	h := strings.TrimSpace(strings.ToLower(m.currentUserHint))
+	if h == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.Assignees), h)
+}
+
 func (m *model) detailLineCount(r row, cols int, now time.Time) int {
 	lines := []string{
 		"title: " + r.Title,
@@ -1060,14 +1112,14 @@ func centerText(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-func dueFlagIcon(r row, now time.Time, loc *time.Location) string {
+func dueSuffix(r row, now time.Time, loc *time.Location) string {
 	if strings.TrimSpace(r.DueAt) == "" {
-		return " "
+		return ""
 	}
 	if isOverdue(r, now, loc) {
-		return "!"
+		return " !"
 	}
-	return "⚑"
+	return " ⚑"
 }
 
 func isOverdue(r row, now time.Time, loc *time.Location) bool {
@@ -1087,15 +1139,15 @@ func isOverdue(r row, now time.Time, loc *time.Location) bool {
 func paletteForTheme(id string) palette {
 	switch id {
 	case "sunset-pop":
-		return palette{Accent: 209, Open: 214, Done: 120, Archive: 208, Muted: 246, Warn: 220}
+		return palette{Accent: 209, BgAccent: 95, Open: 214, Done: 120, Archive: 208, Muted: 246, Warn: 220}
 	case "mint-circuit":
-		return palette{Accent: 79, Open: 50, Done: 84, Archive: 117, Muted: 245, Warn: 159}
+		return palette{Accent: 79, BgAccent: 23, Open: 50, Done: 84, Archive: 117, Muted: 245, Warn: 159}
 	case "paper-fruit":
-		return palette{Accent: 167, Open: 174, Done: 107, Archive: 131, Muted: 246, Warn: 180}
+		return palette{Accent: 167, BgAccent: 224, Open: 174, Done: 107, Archive: 131, Muted: 246, Warn: 180}
 	case "midnight-arcade":
-		return palette{Accent: 45, Open: 81, Done: 119, Archive: 39, Muted: 110, Warn: 228}
+		return palette{Accent: 45, BgAccent: 17, Open: 81, Done: 119, Archive: 39, Muted: 110, Warn: 228}
 	default:
-		return palette{Accent: 81, Open: 39, Done: 120, Archive: 208, Muted: 245, Warn: 220}
+		return palette{Accent: 81, BgAccent: 0, Open: 39, Done: 120, Archive: 208, Muted: 245, Warn: 220}
 	}
 }
 
@@ -1113,6 +1165,9 @@ func (m *model) paintAccent(s string, code int) string {
 func (m *model) paintBanner(s string, p palette) string {
 	if strings.TrimSpace(m.scopeColor) != "" {
 		return m.paintHex(s, m.scopeColor)
+	}
+	if p.BgAccent > 0 && !m.plain {
+		return m.colorizeBg(s, p.Accent, p.BgAccent)
 	}
 	return m.paintAccent(s, p.Accent)
 }
@@ -1139,14 +1194,17 @@ func (m *model) paintStatusMarker(line string, marker string, status string, p p
 	return strings.Replace(line, marker, m.paintStatus(marker, status, p), 1)
 }
 
-func (m *model) paintDueMarker(line string, marker string, r row, now time.Time, p palette) string {
-	if m.plain || strings.TrimSpace(marker) == "" {
+func (m *model) paintDueSuffix(line string, title string, r row, now time.Time, p palette) string {
+	if m.plain {
 		return line
 	}
-	if marker == "!" || isOverdue(r, now, m.loc) {
-		return strings.Replace(line, marker, m.colorize(marker, 203), 1)
+	if isOverdue(r, now, m.loc) {
+		return strings.Replace(line, " !", m.colorize(" !", 203), 1)
 	}
-	return strings.Replace(line, marker, m.colorize(marker, p.Warn), 1)
+	if strings.HasSuffix(title, " ⚑") {
+		return strings.Replace(line, " ⚑", m.colorize(" ⚑", p.Warn), 1)
+	}
+	return line
 }
 
 func (m *model) paintHex(s string, hex string) string {
@@ -1158,6 +1216,13 @@ func (m *model) paintHex(s string, hex string) string {
 		return s
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
+}
+
+func (m *model) colorizeBg(s string, fg int, bg int) string {
+	if m.plain {
+		return s
+	}
+	return fmt.Sprintf("\x1b[38;5;%d;48;5;%dm%s\x1b[0m", fg, bg, s)
 }
 
 func (m *model) paintCollectionLine(line string, p palette) string {
@@ -1224,7 +1289,7 @@ func readKey(r *bufio.Reader) (string, error) {
 		return "enter", nil
 	case 127, 8:
 		return "backspace", nil
-	case ':', '/':
+	case '/':
 		return string(b), nil
 	}
 	if b >= 32 && b <= 126 {
