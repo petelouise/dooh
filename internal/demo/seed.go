@@ -39,11 +39,15 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 		Kind  string
 		Color string
 	}{
-		{"Project Atlas", "project", "#4D96FF"},
-		{"Q1 Goals", "goal", "#FFD166"},
+		{"Atlas Rewrite", "project", "#4D96FF"},
+		{"Ops Automation", "project", "#5AB0FF"},
+		{"Q1 Reliability Goal", "goal", "#FFD166"},
+		{"Personal Systems Goal", "goal", "#E9C46A"},
+		{"Work Area", "area", "#FF7A59"},
+		{"Home Area", "area", "#F28482"},
+		{"Platform Group", "class", "#70E000"},
+		{"Growth Group", "class", "#80ED99"},
 		{"Deep Work", "tag", "#2EC4B6"},
-		{"Personal Ops", "area", "#FF7A59"},
-		{"Engineering", "class", "#70E000"},
 		{"Bugs", "tag", "#FF6B6B"},
 	}
 
