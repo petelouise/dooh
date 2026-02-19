@@ -951,6 +951,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	listThemes := fs.Bool("list-themes", false, "list theme presets")
 	filter := fs.String("filter", "", "filter tasks by text")
 	limit := fs.Int("limit", 12, "max tasks to display")
+	static := fs.Bool("static", false, "render once and exit")
 	dbPath := fs.String("db", "", "sqlite database path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -981,12 +982,28 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 		}
 		return fmt.Errorf("unknown theme %q (available: %s)", selected, strings.Join(ids, ", "))
 	}
-	panel, err := tui.RenderDashboard(db.New(resolveDB(rt, *dbPath)), chosen, *filter, *limit)
+	loc, err := time.LoadLocation(rt.profile.Timezone)
 	if err != nil {
-		return err
+		loc = time.Local
 	}
-	_, _ = fmt.Fprint(out, panel)
-	return nil
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	if *static {
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprint(out, panel)
+		return nil
+	}
+	if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprint(out, panel)
+		return nil
+	}
+	return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc)
 }
 
 func resolveDB(rt runtime, flagVal string) string {
