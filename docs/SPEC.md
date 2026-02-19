@@ -61,7 +61,11 @@
 
 ## Demo and validation
 - `dooh demo seed` inserts varied users, collections, and tasks for quick manual testing.
-- `dooh tui` renders a colorful read-only dashboard from live DB data.
+- `dooh tui` provides an interactive colorful read-only dashboard from live DB data.
+- timestamps in TUI use natural formatting:
+- `today HH:MM`
+- `yesterday HH:MM`
+- `DD Mon YYYY HH:MM`
 - automated tests cover:
 - config profile parsing/merge behavior
 - demo seeding creating expected task/collection data
