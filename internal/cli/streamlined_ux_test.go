@@ -98,7 +98,7 @@ func TestSetupDemoCreatesProfilesAndWhoAmIWorksWithoutFlagKey(t *testing.T) {
 		t.Fatalf("expected setup output, got: %s", out.String())
 	}
 	humanKeyPath := filepath.Join(home, ".config", "dooh", "auth", "human.human.key")
-	agentKeyPath := filepath.Join(home, ".config", "dooh", "auth", "agent.agent.key")
+	agentKeyPath := filepath.Join(home, ".config", "dooh", "auth", "ai.agent.key")
 	if _, err := os.Stat(humanKeyPath); err != nil {
 		t.Fatalf("expected human key file: %v", err)
 	}
@@ -113,6 +113,61 @@ func TestSetupDemoCreatesProfilesAndWhoAmIWorksWithoutFlagKey(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "mode=human") || !strings.Contains(out.String(), "user=") {
 		t.Fatalf("expected whoami context output, got: %s", out.String())
+	}
+}
+
+func TestContextSetShowAndClear(t *testing.T) {
+	home := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	defer func() { _ = os.Setenv("HOME", oldHome) }()
+	_ = os.Setenv("HOME", home)
+
+	var out bytes.Buffer
+	if err := Run([]string{"context", "set", "--profile", "human", "--db", "/tmp/demo.db", "--theme", "sunset-pop"}, &out); err != nil {
+		t.Fatalf("context set should pass: %v", err)
+	}
+	out.Reset()
+	if err := Run([]string{"context", "show"}, &out); err != nil {
+		t.Fatalf("context show should pass: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "profile=human") || !strings.Contains(s, "db=/tmp/demo.db") || !strings.Contains(s, "theme=sunset-pop") {
+		t.Fatalf("unexpected context show output: %s", s)
+	}
+	out.Reset()
+	if err := Run([]string{"context", "clear"}, &out); err != nil {
+		t.Fatalf("context clear should pass: %v", err)
+	}
+}
+
+func TestAIEnvForcesAIProfile(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	sqlite, dbPath := newReadAuthDB(t)
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u2','Agent Demo','active');")
+	mustExec(t, sqlite, "INSERT INTO api_keys(id,user_id,key_prefix,key_hash,scopes,client_type,revoked_at) VALUES('k2','u2','aaaaaaaa','"+auth.HashAPIKey("dooh_agent_key")+"','tasks:read,collections:read','agent_cli',NULL);")
+
+	home := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	oldProfile := os.Getenv("DOOH_PROFILE")
+	oldAIKey := os.Getenv("DOOH_AI_KEY")
+	defer func() {
+		_ = os.Setenv("HOME", oldHome)
+		_ = os.Setenv("DOOH_PROFILE", oldProfile)
+		_ = os.Setenv("DOOH_AI_KEY", oldAIKey)
+	}()
+	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("DOOH_PROFILE", "human")
+	_ = os.Setenv("DOOH_AI_KEY", "dooh_agent_key")
+
+	var out bytes.Buffer
+	if err := Run([]string{"whoami", "--db", dbPath}, &out); err != nil {
+		t.Fatalf("whoami should pass in ai env: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "profile=ai") || !strings.Contains(got, "mode=ai") {
+		t.Fatalf("expected ai profile and mode, got: %s", got)
 	}
 }
 

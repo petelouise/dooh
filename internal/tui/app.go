@@ -638,7 +638,7 @@ func (m *model) renderHeader(cols int, p palette) string {
 	priorityW := 8
 	scheduledW := 17
 	separatorW := 4
-	assigneeW := 3
+	assigneeW := 1
 	titleW := cols - (1 + 1 + 1 + 1 + separatorW + assigneeW + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
@@ -752,7 +752,7 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 	priorityW := 8
 	scheduledW := 17
 	separatorW := 4
-	assigneeW := 3
+	assigneeW := 1
 	titleW := cols - (1 + 1 + 1 + 1 + separatorW + assigneeW + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
@@ -1451,25 +1451,17 @@ func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
 func assigneeInitials(names string) string {
 	parts := strings.Split(strings.TrimSpace(names), ",")
 	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
-		return "--"
+		return "-"
 	}
 	words := strings.Fields(strings.TrimSpace(parts[0]))
 	if len(words) == 0 {
-		return "--"
+		return "-"
 	}
-	if len(words) == 1 {
-		r := []rune(words[0])
-		if len(r) == 0 {
-			return "--"
-		}
-		if len(r) == 1 {
-			return strings.ToUpper(string(r[0])) + "-"
-		}
-		return strings.ToUpper(string(r[0]) + string(r[1]))
+	r := []rune(words[0])
+	if len(r) == 0 {
+		return "-"
 	}
-	a := []rune(words[0])
-	b := []rune(words[1])
-	return strings.ToUpper(string(a[0]) + string(b[0]))
+	return strings.ToUpper(string(r[0]))
 }
 
 func (m *model) assignedToCurrent(r row) bool {

@@ -1,6 +1,6 @@
 # dooh
 
-`dooh` (pronounced "duo") is a local-first task/project/goal manager for a human + AI agent pair.
+`dooh` (pronounced "duo") is a local-first task/project/goal manager for a human + ai pair.
 
 ## Current status
 Working local MVP includes:
@@ -21,48 +21,54 @@ export GOCACHE="$(pwd)/.cache/go-build"
 
 ## Streamlined quick start
 ```bash
-# one command bootstrap: db + seed + human/ai demo keys in profile auth store
-go run ./cmd/dooh setup demo --db ./dooh.db
+# install once (recommended for normal use)
+go build -o ~/.local/bin/dooh ./cmd/dooh
 
-# run directly (stored login keys and explicit --api-key both work)
-DOOH_MODE=human go run ./cmd/dooh --profile human whoami
-go run ./cmd/dooh --profile human tui --theme midnight-arcade
+# one command bootstrap: db + seed + human/ai demo keys in profile auth store
+dooh setup demo --db ./dooh.db
+
+# optional local overrides (persisted)
+dooh context set --profile human --db ./dooh.db --theme paper-fruit
+
+# run directly (no repeated --db/--profile required after context setup)
+dooh whoami
+dooh tui
 ```
 
 ## Manual quick start
 ```bash
 # 1) initialize database
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh db init --db ./dooh.db
+dooh db init --db ./dooh.db
 
 # 2) bootstrap first human user
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh user create --db ./dooh.db --name Human --bootstrap
+dooh user create --db ./dooh.db --name Human --bootstrap
 
 # 3) create first human admin key
 HUMAN_ID=$(sqlite3 -noheader ./dooh.db "select id from users limit 1;")
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh key create --db ./dooh.db --user "$HUMAN_ID" --client-type human_cli --scopes "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback" --bootstrap
+dooh key create --db ./dooh.db --user "$HUMAN_ID" --client-type human_cli --scopes "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback" --bootstrap
 
 # 4) use printed api_key for writes (or store once via login command)
 export DOOH_MODE=human
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task add --db ./dooh.db --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
+dooh task add --db ./dooh.db --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
+dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
 
 # 5) list + export
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task list --db ./dooh.db --api-key "<PASTE_KEY>"
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection list --db ./dooh.db --api-key "<PASTE_KEY>"
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --out ./site-data --api-key "<PASTE_KEY>"
+dooh task list --db ./dooh.db --api-key "<PASTE_KEY>"
+dooh collection list --db ./dooh.db --api-key "<PASTE_KEY>"
+dooh export site --db ./dooh.db --out ./site-data --api-key "<PASTE_KEY>"
 ```
 
 Relationship commands:
 ```bash
-go run ./cmd/dooh task block --id <task> --by <task>
-go run ./cmd/dooh task unblock --id <task> --by <task>
-go run ./cmd/dooh task subtask add --parent <task> --child <task>
-go run ./cmd/dooh task subtask remove --parent <task> --child <task>
-go run ./cmd/dooh task assign add --id <task> --user <user_id>
-go run ./cmd/dooh task assign remove --id <task> --user <user_id>
-go run ./cmd/dooh task reopen --id <task>
-go run ./cmd/dooh collection link --parent <collection> --child <collection>
-go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
+dooh task block --id <task> --by <task>
+dooh task unblock --id <task> --by <task>
+dooh task subtask add --parent <task> --child <task>
+dooh task subtask remove --parent <task> --child <task>
+dooh task assign add --id <task> --user <user_id>
+dooh task assign remove --id <task> --user <user_id>
+dooh task reopen --id <task>
+dooh collection link --parent <collection> --child <collection>
+dooh collection unlink --parent <collection> --child <collection>
 ```
 
 For all data commands (read and write):
@@ -72,31 +78,31 @@ For all data commands (read and write):
 
 Store keys once per profile:
 ```bash
-go run ./cmd/dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
-go run ./cmd/dooh --profile agent login --db ./dooh.db --api-key "<AGENT_KEY>"
+dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
+dooh --profile ai login --db ./dooh.db --api-key "<AI_KEY>"
 ```
 
-Emit shell exports for profile context:
+Inspect or update persisted context:
 ```bash
-eval "$(go run ./cmd/dooh --profile human env --mode human)"
-eval "$(go run ./cmd/dooh --profile agent env --mode ai)"
+dooh context show
+dooh context set --profile ai
+dooh context clear
 ```
 
 Inspect current execution identity:
 ```bash
-DOOH_MODE=human go run ./cmd/dooh whoami --api-key "<HUMAN_KEY>"
-DOOH_MODE=ai DOOH_API_KEY="<AGENT_KEY>" go run ./cmd/dooh whoami
+dooh whoami --api-key "<HUMAN_KEY>"
+DOOH_AI_KEY="<AI_KEY>" dooh whoami
 ```
 
 ## Fast demo seed + colorful dashboard
 ```bash
-export GOCACHE="$(pwd)/.cache/go-build"
-go run ./cmd/dooh db init --db ./dooh.db
-go run ./cmd/dooh demo seed --db ./dooh.db
+dooh db init --db ./dooh.db
+dooh demo seed --db ./dooh.db
 export DOOH_MODE=human
-go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12
-go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --static
-go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --plain
+dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12
+dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --static
+dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --plain
 ```
 
 TUI controls:
@@ -159,9 +165,9 @@ Fallback behavior:
 
 ## Theme presets
 ```bash
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --list-themes
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --theme sunset-pop
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh tui --theme sunset-pop --filter rollback
+dooh tui --list-themes
+dooh tui --theme sunset-pop
+dooh tui --theme sunset-pop --filter rollback
 ```
 
 ## Config profiles
@@ -171,26 +177,37 @@ Profiles are named blocks in config files:
 
 Precedence:
 - command flags
-- env vars (`DOOH_DB`, profile-selected key env var)
-- selected profile (`--profile` or `DOOH_PROFILE`)
+- env vars (`DOOH_DB`, `DOOH_PROFILE`, profile-selected key env var)
+- persisted context overrides (`dooh context set`)
+- selected profile (`--profile` or env/context resolved)
 - `[profile.default]`
 - built-in defaults
 
 Generate a starter file:
 ```bash
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh config init
+dooh config init
 ```
 
 Inspect resolved config:
 ```bash
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh config show
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
+dooh config show
+dooh --profile human config show
 ```
 
 ## Auth safety behavior
 - all runtime data commands require authenticated user context (no anonymous mode).
 - explicit `--api-key` takes priority and determines actor from key `client_type`.
 - if no explicit key is provided, auth resolves from `DOOH_MODE` + stored/env keys.
-- `DOOH_MODE` supports `human`, `ai`, and legacy `agent`.
+- `DOOH_MODE` supports `human`, `ai`, and legacy `agent`, but is optional.
+- ai env key (`DOOH_AI_KEY`, or `DOOH_API_KEY` for compatibility) enables zero-touch ai operation.
+- when ai env key is present, profile is auto-forced to `ai` unless `--profile` is explicitly provided.
 - Key `client_type` must be interactive (`human_cli` or `agent_cli`) for runtime commands.
 - profile-scoped keys are written to `~/.config/dooh/auth/<profile>.<actor>.key` with `0600` permissions.
+- user/key lifecycle admin actions are human-only by default; non-human requires system key + `--allow-system-admin`.
+
+## Developer-only run mode
+Using `go run` is still supported for development:
+```bash
+go run ./cmd/dooh version
+go run ./cmd/dooh context show
+```

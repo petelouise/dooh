@@ -58,6 +58,21 @@ func TestMustAuthInfersActorFromExplicitKeyAndRespectsEnvSourceRules(t *testing.
 	}
 }
 
+func TestRequireHumanLifecycleAdmin(t *testing.T) {
+	if err := requireHumanLifecycleAdmin(principal{Actor: "human", ClientType: "human_cli"}, false); err != nil {
+		t.Fatalf("human should be allowed: %v", err)
+	}
+	if err := requireHumanLifecycleAdmin(principal{Actor: "agent", ClientType: "agent_cli"}, false); err == nil {
+		t.Fatalf("ai actor should be denied without override")
+	}
+	if err := requireHumanLifecycleAdmin(principal{Actor: "agent", ClientType: "system"}, false); err == nil {
+		t.Fatalf("system key should be denied without override flag")
+	}
+	if err := requireHumanLifecycleAdmin(principal{Actor: "agent", ClientType: "system"}, true); err != nil {
+		t.Fatalf("system key should be allowed with override flag: %v", err)
+	}
+}
+
 func newAuthDB(t *testing.T) db.SQLite {
 	t.Helper()
 	d := t.TempDir()
