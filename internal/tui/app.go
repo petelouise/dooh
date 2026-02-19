@@ -43,6 +43,23 @@ type progressRow struct {
 	Total     int
 }
 
+type FilterState struct {
+	Text      string
+	Status    string
+	Priority  string
+	Tags      []string
+	Assignee  string
+	ScopeKind string
+	ScopeID   string
+	ScopeName string
+	TodayMode string
+}
+
+type FacetOption struct {
+	Name  string
+	Count int
+}
+
 type palette struct {
 	Accent   int
 	BgAccent int
@@ -53,15 +70,21 @@ type palette struct {
 	Warn     int
 }
 
+const (
+	filterFieldText = iota
+	filterFieldStatus
+	filterFieldPriority
+	filterFieldTags
+	filterFieldAssignee
+	filterFieldTodayMode
+	filterFieldCount
+)
+
 type model struct {
 	sqlite          db.SQLite
 	themes          []Theme
 	themeIndex      int
-	filter          string
-	statusFilter    string
-	priorityFilter  string
-	tagFilter       string
-	assigneeFilter  string
+	filters         FilterState
 	selected        int
 	limit           int
 	loc             *time.Location
@@ -70,14 +93,17 @@ type model struct {
 	rng             *rand.Rand
 	currentUserHint string
 
-	scopeKind  string
-	scopeID    string
-	scopeName  string
 	scopeColor string
 
-	editFilter  bool
-	filterDraft string
-	expandedID  string
+	filterFocus    int
+	editFilter     bool
+	editField      int
+	fieldInput     string
+	fieldDraftTags []string
+	dropdown       []FacetOption
+	dropdownIndex  int
+	dropdownOpen   bool
+	expandedID     string
 }
 
 func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, plain bool) error {
@@ -168,12 +194,15 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		}
 	}
 	return model{
-		sqlite:          sqlite,
-		themes:          catalog.Themes,
-		themeIndex:      idx,
-		filter:          strings.TrimSpace(filter),
-		statusFilter:    "open",
-		priorityFilter:  "all",
+		sqlite:     sqlite,
+		themes:     catalog.Themes,
+		themeIndex: idx,
+		filters: FilterState{
+			Text:      strings.TrimSpace(filter),
+			Status:    "open",
+			Priority:  "all",
+			TodayMode: "mine",
+		},
 		limit:           limit,
 		loc:             loc,
 		plain:           plain,
@@ -185,28 +214,17 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 
 func (m *model) handleKey(key string) bool {
 	if m.editFilter {
-		switch key {
-		case "enter", "esc":
-			m.editFilter = false
-		case "backspace":
-			if len(m.filterDraft) > 0 {
-				m.filterDraft = m.filterDraft[:len(m.filterDraft)-1]
-				m.filter = strings.TrimSpace(m.filterDraft)
-				m.selected = 0
-			}
-		default:
-			if len(key) == 1 {
-				m.filterDraft += key
-				m.filter = strings.TrimSpace(m.filterDraft)
-				m.selected = 0
-			}
-		}
+		m.handleFilterEdit(key)
 		return false
 	}
 
 	switch key {
 	case "q":
 		return true
+	case "tab":
+		m.filterFocus = (m.filterFocus + 1) % filterFieldCount
+	case "shift_tab":
+		m.filterFocus = (m.filterFocus + filterFieldCount - 1) % filterFieldCount
 	case "up":
 		m.selected--
 	case "down":
@@ -218,16 +236,31 @@ func (m *model) handleKey(key string) bool {
 	case "left":
 		m.expandedID = ""
 	case "enter":
-		m.enterSelected()
+		if m.filterFocus == filterFieldStatus || m.filterFocus == filterFieldPriority || m.filterFocus == filterFieldTodayMode || m.filterFocus == filterFieldText || m.filterFocus == filterFieldTags || m.filterFocus == filterFieldAssignee {
+			m.beginFilterEdit(m.filterFocus)
+		} else {
+			m.enterSelected()
+		}
 	case "/":
-		m.editFilter = true
-		m.filterDraft = m.filter
+		m.filterFocus = filterFieldText
+		m.beginFilterEdit(filterFieldText)
+	case "f":
+		m.filterFocus = filterFieldText
+		m.beginFilterEdit(filterFieldText)
+	case "g":
+		m.filterFocus = filterFieldTags
+		m.beginFilterEdit(filterFieldTags)
+	case "a":
+		m.filterFocus = filterFieldAssignee
+		m.beginFilterEdit(filterFieldAssignee)
+	case "m":
+		m.filters.TodayMode = cycle([]string{"mine", "all"}, m.filters.TodayMode)
 	case "s":
-		m.statusFilter = cycle([]string{"open", "all", "completed", "archived"}, m.statusFilter)
+		m.filters.Status = cycle([]string{"open", "all", "completed", "archived"}, m.filters.Status)
 		m.selected = 0
 		m.expandedID = ""
 	case "p":
-		m.priorityFilter = cycle([]string{"all", "now", "soon", "later"}, m.priorityFilter)
+		m.filters.Priority = cycle([]string{"all", "now", "soon", "later"}, m.filters.Priority)
 		m.selected = 0
 		m.expandedID = ""
 	case "c":
@@ -251,6 +284,170 @@ func (m *model) handleKey(key string) bool {
 	return false
 }
 
+func (m *model) beginFilterEdit(field int) {
+	m.editFilter = true
+	m.editField = field
+	m.dropdownOpen = false
+	m.dropdown = nil
+	m.dropdownIndex = 0
+	switch field {
+	case filterFieldText:
+		m.fieldInput = m.filters.Text
+	case filterFieldTags:
+		m.fieldDraftTags = append([]string{}, m.filters.Tags...)
+		m.fieldInput = ""
+		m.updateFacetOptions(filterFieldTags)
+	case filterFieldAssignee:
+		m.fieldInput = m.filters.Assignee
+		m.updateFacetOptions(filterFieldAssignee)
+	case filterFieldStatus, filterFieldPriority, filterFieldTodayMode:
+		m.updateFacetOptions(field)
+	}
+}
+
+func (m *model) handleFilterEdit(key string) {
+	switch m.editField {
+	case filterFieldText:
+		switch key {
+		case "enter", "esc":
+			m.editFilter = false
+		case "backspace":
+			if len(m.fieldInput) > 0 {
+				m.fieldInput = m.fieldInput[:len(m.fieldInput)-1]
+				m.filters.Text = strings.TrimSpace(m.fieldInput)
+				m.selected = 0
+			}
+		default:
+			if len(key) == 1 {
+				m.fieldInput += key
+				m.filters.Text = strings.TrimSpace(m.fieldInput)
+				m.selected = 0
+			}
+		}
+	case filterFieldTags:
+		switch key {
+		case "esc":
+			m.editFilter = false
+		case "enter":
+			m.selectCurrentFacetOption()
+		case "up":
+			if len(m.dropdown) > 0 {
+				m.dropdownIndex = (m.dropdownIndex + len(m.dropdown) - 1) % len(m.dropdown)
+			}
+		case "down":
+			if len(m.dropdown) > 0 {
+				m.dropdownIndex = (m.dropdownIndex + 1) % len(m.dropdown)
+			}
+		case "backspace":
+			if len(m.fieldInput) > 0 {
+				m.fieldInput = m.fieldInput[:len(m.fieldInput)-1]
+			} else if len(m.fieldDraftTags) > 0 {
+				m.fieldDraftTags = m.fieldDraftTags[:len(m.fieldDraftTags)-1]
+				m.filters.Tags = append([]string{}, m.fieldDraftTags...)
+				m.selected = 0
+			}
+			m.updateFacetOptions(filterFieldTags)
+		default:
+			if len(key) == 1 {
+				m.fieldInput += key
+				m.updateFacetOptions(filterFieldTags)
+			}
+		}
+	case filterFieldAssignee:
+		switch key {
+		case "esc":
+			m.editFilter = false
+		case "enter":
+			m.selectCurrentFacetOption()
+		case "up":
+			if len(m.dropdown) > 0 {
+				m.dropdownIndex = (m.dropdownIndex + len(m.dropdown) - 1) % len(m.dropdown)
+			}
+		case "down":
+			if len(m.dropdown) > 0 {
+				m.dropdownIndex = (m.dropdownIndex + 1) % len(m.dropdown)
+			}
+		case "backspace":
+			if len(m.fieldInput) > 0 {
+				m.fieldInput = m.fieldInput[:len(m.fieldInput)-1]
+				m.updateFacetOptions(filterFieldAssignee)
+			}
+		default:
+			if len(key) == 1 {
+				m.fieldInput += key
+				m.updateFacetOptions(filterFieldAssignee)
+			}
+		}
+	case filterFieldStatus:
+		switch key {
+		case "esc", "enter":
+			m.editFilter = false
+		case "up", "down":
+			m.filters.Status = cycle([]string{"open", "all", "completed", "archived"}, m.filters.Status)
+		}
+	case filterFieldPriority:
+		switch key {
+		case "esc", "enter":
+			m.editFilter = false
+		case "up", "down":
+			m.filters.Priority = cycle([]string{"all", "now", "soon", "later"}, m.filters.Priority)
+		}
+	case filterFieldTodayMode:
+		switch key {
+		case "esc", "enter":
+			m.editFilter = false
+		case "up", "down":
+			m.filters.TodayMode = cycle([]string{"mine", "all"}, m.filters.TodayMode)
+		}
+	}
+}
+
+func (m *model) selectCurrentFacetOption() {
+	if len(m.dropdown) == 0 {
+		if m.editField == filterFieldAssignee {
+			m.filters.Assignee = strings.TrimSpace(m.fieldInput)
+			m.editFilter = false
+		}
+		return
+	}
+	opt := m.dropdown[m.dropdownIndex]
+	switch m.editField {
+	case filterFieldTags:
+		if !containsExact(m.fieldDraftTags, opt.Name) {
+			m.fieldDraftTags = append(m.fieldDraftTags, opt.Name)
+			m.filters.Tags = append([]string{}, m.fieldDraftTags...)
+			m.selected = 0
+		}
+		m.fieldInput = ""
+		m.updateFacetOptions(filterFieldTags)
+	case filterFieldAssignee:
+		m.filters.Assignee = opt.Name
+		m.selected = 0
+		m.editFilter = false
+	}
+}
+
+func (m *model) updateFacetOptions(field int) {
+	options, err := m.computeFacetOptions(field)
+	if err != nil {
+		m.dropdown = nil
+		m.dropdownOpen = false
+		return
+	}
+	needle := strings.ToLower(strings.TrimSpace(m.fieldInput))
+	filtered := make([]FacetOption, 0, len(options))
+	for _, opt := range options {
+		if needle == "" || fuzzyMatch(strings.ToLower(opt.Name), needle) {
+			filtered = append(filtered, opt)
+		}
+	}
+	m.dropdown = filtered
+	m.dropdownOpen = len(filtered) > 0
+	if m.dropdownIndex >= len(filtered) {
+		m.dropdownIndex = 0
+	}
+}
+
 func (m *model) enterSelected() {
 	switch m.view {
 	case "projects":
@@ -264,9 +461,9 @@ func (m *model) enterSelected() {
 		}
 		m.selected = clampIndex(m.selected, len(rows))
 		r := rows[m.selected]
-		m.scopeKind = "project"
-		m.scopeID = r.ID
-		m.scopeName = r.Name
+		m.filters.ScopeKind = "project"
+		m.filters.ScopeID = r.ID
+		m.filters.ScopeName = r.Name
 		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
 	case "goals":
@@ -280,9 +477,9 @@ func (m *model) enterSelected() {
 		}
 		m.selected = clampIndex(m.selected, len(rows))
 		r := rows[m.selected]
-		m.scopeKind = "goal"
-		m.scopeID = r.ID
-		m.scopeName = r.Name
+		m.filters.ScopeKind = "goal"
+		m.filters.ScopeID = r.ID
+		m.filters.ScopeName = r.Name
 		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
 	case "assignees":
@@ -296,9 +493,9 @@ func (m *model) enterSelected() {
 		}
 		m.selected = clampIndex(m.selected, len(rows))
 		r := rows[m.selected]
-		m.scopeKind = "assignee"
-		m.scopeID = r.ID
-		m.scopeName = r.Name
+		m.filters.ScopeKind = "assignee"
+		m.filters.ScopeID = r.ID
+		m.filters.ScopeName = r.Name
 		m.scopeColor = ""
 		m.switchView("tasks")
 	default:
@@ -307,15 +504,16 @@ func (m *model) enterSelected() {
 }
 
 func (m *model) clearFiltersAndScope() {
-	m.filter = ""
-	m.filterDraft = ""
-	m.statusFilter = "open"
-	m.priorityFilter = "all"
-	m.tagFilter = ""
-	m.assigneeFilter = ""
-	m.scopeKind = ""
-	m.scopeID = ""
-	m.scopeName = ""
+	m.filters.Text = ""
+	m.fieldInput = ""
+	m.filters.Status = "open"
+	m.filters.Priority = "all"
+	m.filters.Tags = nil
+	m.filters.Assignee = ""
+	m.filters.ScopeKind = ""
+	m.filters.ScopeID = ""
+	m.filters.ScopeName = ""
+	m.filters.TodayMode = "mine"
 	m.scopeColor = ""
 	m.selected = 0
 	m.expandedID = ""
@@ -377,28 +575,36 @@ func (m *model) render(cols int, lines int) (string, error) {
 	headerLines := 8
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
+	if m.editFilter && m.dropdownOpen {
+		bodyBudget -= m.dropdownHeight()
+	}
 	if bodyBudget < 4 {
 		bodyBudget = 4
 	}
 
 	scope := "all"
-	if m.scopeKind != "" {
-		scope = m.scopeKind + ":" + m.scopeName
+	if m.filters.ScopeKind != "" {
+		scope = m.filters.ScopeKind + ":" + m.filters.ScopeName
 	}
 	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s", m.themes[m.themeIndex].Name, m.view)
-	filterLine := fmt.Sprintf("FILTERS  [text:%s] [status:%s] [priority:%s] [tag:%s] [assignee:%s] [scope:%s]", fallbackDash(m.activeFilter()), m.statusFilter, m.priorityFilter, fallbackDash(m.tagFilter), fallbackDash(m.assigneeFilter), scope)
-	banner := bannerText(m.view, m.scopeKind, m.scopeName)
+	filterLine := m.renderFilterBar(scope, cols)
+	banner := bannerText(m.view, m.filters.ScopeKind, m.filters.ScopeName)
 	bannerLine := centerText("["+banner+"]", cols)
 
 	frame := make([]string, 0, lines)
 	frame = append(frame, m.paintAccent(clampLine(titleLine, cols), p.Accent))
 	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), p))
-	frame = append(frame, m.paintMuted(clampLine(filterLine, cols), p))
+	frame = append(frame, filterLine)
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, clampLine(renderTabs(cols, m.view), cols))
 	frame = append(frame, clampLine(countLine, cols))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, m.renderHeader(cols, p))
+	if m.dropdownOpen && m.editFilter {
+		for _, line := range m.renderDropdown(cols, p) {
+			frame = append(frame, line)
+		}
+	}
 
 	frame = append(frame, body...)
 	for len(frame) < headerLines+bodyBudget {
@@ -407,11 +613,11 @@ func (m *model) render(cols int, lines int) (string, error) {
 
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	if m.editFilter {
-		frame = append(frame, clampLine("filter> "+m.filterDraft+" (live fuzzy; Enter/Esc close)", cols))
+		frame = append(frame, clampLine(m.editPrompt(), cols))
 	} else {
 		frame = append(frame, clampLine(selectedLine, cols))
 	}
-	frame = append(frame, clampLine("keys: arrows, Enter open/expand, / filter, s status, p priority, c clear, t random theme, 1-5 views, q quit", cols))
+	frame = append(frame, clampLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text, g tags, a assignee, m today-mode, s status, p priority, c clear, t theme, 1-5 views, q quit", cols))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -448,6 +654,9 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 	headerLines := 8
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
+	if m.editFilter && m.dropdownOpen {
+		bodyBudget -= m.dropdownHeight()
+	}
 	if bodyBudget < 4 {
 		bodyBudget = 4
 	}
@@ -503,19 +712,14 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 			return nil, "", "", err
 		}
 		todayRows := make([]row, 0, len(rows))
-		allToday := make([]row, 0, len(rows))
 		for _, r := range rows {
 			if !isTodayScheduled(r.Scheduled, m.loc, now) {
 				continue
 			}
-			allToday = append(allToday, r)
-			if m.scopeKind != "assignee" && strings.TrimSpace(m.assigneeFilter) == "" && !m.assignedToCurrent(r) {
+			if m.filters.TodayMode == "mine" && m.filters.ScopeKind != "assignee" && strings.TrimSpace(m.filters.Assignee) == "" && !m.assignedToCurrent(r) {
 				continue
 			}
 			todayRows = append(todayRows, r)
-		}
-		if len(todayRows) == 0 && len(allToday) > 0 {
-			todayRows = allToday
 		}
 		if len(todayRows) == 0 {
 			m.selected = 0
@@ -796,35 +1000,38 @@ ORDER BY u.name ASC;`)
 }
 
 func (m *model) activeFilter() string {
-	if m.editFilter {
-		return strings.TrimSpace(m.filterDraft)
+	if m.editFilter && m.editField == filterFieldText {
+		return strings.TrimSpace(m.fieldInput)
 	}
-	return strings.TrimSpace(m.filter)
+	return strings.TrimSpace(m.filters.Text)
 }
 
 func (m *model) applyFilters(in []row) []row {
 	f := strings.ToLower(m.activeFilter())
 	out := make([]row, 0, len(in))
 	for _, r := range in {
-		if m.statusFilter != "all" && r.Status != m.statusFilter {
+		if m.filters.Status != "all" && r.Status != m.filters.Status {
 			continue
 		}
-		if m.priorityFilter != "all" && r.Priority != m.priorityFilter {
+		if m.filters.Priority != "all" && r.Priority != m.filters.Priority {
 			continue
 		}
-		if m.tagFilter != "" && !fuzzyMatch(strings.ToLower(r.Tags), strings.ToLower(m.tagFilter)) {
+		if len(m.filters.Tags) > 0 {
+			rowTags := splitCSVLower(r.Tags)
+			if !containsAllTags(rowTags, m.filters.Tags) {
+				continue
+			}
+		}
+		if m.filters.Assignee != "" && !fuzzyMatch(strings.ToLower(r.Assignees), strings.ToLower(m.filters.Assignee)) {
 			continue
 		}
-		if m.assigneeFilter != "" && !fuzzyMatch(strings.ToLower(r.Assignees), strings.ToLower(m.assigneeFilter)) {
+		if m.filters.ScopeKind == "project" && !containsToken(r.ProjectIDs, m.filters.ScopeID) {
 			continue
 		}
-		if m.scopeKind == "project" && !containsToken(r.ProjectIDs, m.scopeID) {
+		if m.filters.ScopeKind == "goal" && !containsToken(r.GoalIDs, m.filters.ScopeID) {
 			continue
 		}
-		if m.scopeKind == "goal" && !containsToken(r.GoalIDs, m.scopeID) {
-			continue
-		}
-		if m.scopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.scopeID) {
+		if m.filters.ScopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.filters.ScopeID) {
 			continue
 		}
 		if f != "" {
@@ -1029,6 +1236,218 @@ func fallbackDash(v string) string {
 		return "-"
 	}
 	return strings.TrimSpace(v)
+}
+
+func (m *model) renderFilterBar(scope string, cols int) string {
+	parts := []string{
+		filterChip("text", fallbackDash(m.activeFilter()), m.filterFocus == filterFieldText && !m.editFilter),
+		filterChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter),
+		filterChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter),
+		filterChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter),
+		filterChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter),
+		filterChip("scope", scope, false),
+	}
+	if m.view == "today" {
+		parts = append(parts, filterChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && !m.editFilter))
+	}
+	line := "FILTERS  " + strings.Join(parts, " ")
+	return m.paintMuted(clampLine(line, cols), paletteForTheme(m.themes[m.themeIndex].ID))
+}
+
+func filterChip(k string, v string, focused bool) string {
+	if focused {
+		return fmt.Sprintf("{%s:%s}", k, v)
+	}
+	return fmt.Sprintf("[%s:%s]", k, v)
+}
+
+func (m *model) editPrompt() string {
+	field := []string{"text", "status", "priority", "tags", "assignee", "today"}[m.editField]
+	switch m.editField {
+	case filterFieldTags:
+		return fmt.Sprintf("edit %s: %s | input=%s (Enter add, Backspace remove last, Esc done)", field, strings.Join(m.fieldDraftTags, ","), m.fieldInput)
+	case filterFieldAssignee:
+		return fmt.Sprintf("edit %s: %s (Enter select, Esc done)", field, m.fieldInput)
+	case filterFieldStatus:
+		return fmt.Sprintf("edit %s: %s (Up/Down cycle, Enter/Esc close)", field, m.filters.Status)
+	case filterFieldPriority:
+		return fmt.Sprintf("edit %s: %s (Up/Down cycle, Enter/Esc close)", field, m.filters.Priority)
+	case filterFieldTodayMode:
+		return fmt.Sprintf("edit %s: %s (Up/Down cycle, Enter/Esc close)", field, m.filters.TodayMode)
+	default:
+		return fmt.Sprintf("edit %s: %s (live fuzzy, Enter/Esc close)", field, m.fieldInput)
+	}
+}
+
+func (m *model) renderDropdown(cols int, p palette) []string {
+	max := m.dropdownHeight()
+	if max <= 0 {
+		return nil
+	}
+	out := make([]string, 0, max)
+	for i := 0; i < len(m.dropdown) && i < max; i++ {
+		prefix := "  "
+		if i == m.dropdownIndex {
+			prefix = "> "
+		}
+		line := fmt.Sprintf("%s%s (%d)", prefix, m.dropdown[i].Name, m.dropdown[i].Count)
+		if i == m.dropdownIndex {
+			line = m.paintSelected(line, p)
+		} else {
+			line = m.paintMuted(line, p)
+		}
+		out = append(out, clampLine(line, cols))
+	}
+	return out
+}
+
+func (m *model) dropdownHeight() int {
+	if !m.dropdownOpen {
+		return 0
+	}
+	if len(m.dropdown) > 6 {
+		return 6
+	}
+	return len(m.dropdown)
+}
+
+func (m *model) computeFacetOptions(field int) ([]FacetOption, error) {
+	rows, err := m.loadRows()
+	if err != nil {
+		return nil, err
+	}
+	filtered := m.applyFiltersExcluding(rows, field)
+	switch field {
+	case filterFieldTags:
+		counts := map[string]int{}
+		for _, r := range filtered {
+			seen := map[string]bool{}
+			for _, tag := range splitCSV(r.Tags) {
+				if tag == "" || seen[strings.ToLower(tag)] {
+					continue
+				}
+				seen[strings.ToLower(tag)] = true
+				counts[tag]++
+			}
+		}
+		return mapToFacetOptions(counts), nil
+	case filterFieldAssignee:
+		counts := map[string]int{}
+		for _, r := range filtered {
+			seen := map[string]bool{}
+			for _, name := range splitCSV(r.Assignees) {
+				if name == "" || seen[strings.ToLower(name)] {
+					continue
+				}
+				seen[strings.ToLower(name)] = true
+				counts[name]++
+			}
+		}
+		return mapToFacetOptions(counts), nil
+	case filterFieldStatus:
+		return []FacetOption{{Name: "open"}, {Name: "all"}, {Name: "completed"}, {Name: "archived"}}, nil
+	case filterFieldPriority:
+		return []FacetOption{{Name: "all"}, {Name: "now"}, {Name: "soon"}, {Name: "later"}}, nil
+	case filterFieldTodayMode:
+		return []FacetOption{{Name: "mine"}, {Name: "all"}}, nil
+	default:
+		return nil, nil
+	}
+}
+
+func mapToFacetOptions(counts map[string]int) []FacetOption {
+	out := make([]FacetOption, 0, len(counts))
+	for k, v := range counts {
+		out = append(out, FacetOption{Name: k, Count: v})
+	}
+	sortFacetOptions(out)
+	return out
+}
+
+func sortFacetOptions(in []FacetOption) {
+	for i := 0; i < len(in); i++ {
+		for j := i + 1; j < len(in); j++ {
+			if in[j].Count > in[i].Count || (in[j].Count == in[i].Count && strings.ToLower(in[j].Name) < strings.ToLower(in[i].Name)) {
+				in[i], in[j] = in[j], in[i]
+			}
+		}
+	}
+}
+
+func splitCSV(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func splitCSVLower(v string) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range splitCSV(v) {
+		out[strings.ToLower(p)] = true
+	}
+	return out
+}
+
+func containsAllTags(rowTags map[string]bool, selected []string) bool {
+	for _, t := range selected {
+		if !rowTags[strings.ToLower(strings.TrimSpace(t))] {
+			return false
+		}
+	}
+	return true
+}
+
+func containsExact(list []string, want string) bool {
+	for _, v := range list {
+		if strings.EqualFold(strings.TrimSpace(v), strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
+	out := make([]row, 0, len(in))
+	for _, r := range in {
+		if excludeField != filterFieldStatus && m.filters.Status != "all" && r.Status != m.filters.Status {
+			continue
+		}
+		if excludeField != filterFieldPriority && m.filters.Priority != "all" && r.Priority != m.filters.Priority {
+			continue
+		}
+		if excludeField != filterFieldTags && len(m.filters.Tags) > 0 {
+			rowTags := splitCSVLower(r.Tags)
+			if !containsAllTags(rowTags, m.filters.Tags) {
+				continue
+			}
+		}
+		if excludeField != filterFieldAssignee && m.filters.Assignee != "" && !fuzzyMatch(strings.ToLower(r.Assignees), strings.ToLower(m.filters.Assignee)) {
+			continue
+		}
+		if m.filters.ScopeKind == "project" && !containsToken(r.ProjectIDs, m.filters.ScopeID) {
+			continue
+		}
+		if m.filters.ScopeKind == "goal" && !containsToken(r.GoalIDs, m.filters.ScopeID) {
+			continue
+		}
+		if m.filters.ScopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.filters.ScopeID) {
+			continue
+		}
+		if excludeField != filterFieldText && m.filters.Text != "" {
+			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Priority, r.Collection, r.Tags, r.Assignees}, " "))
+			if !fuzzyMatch(h, strings.ToLower(m.filters.Text)) {
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 func assigneeInitials(names string) string {
@@ -1274,6 +1693,8 @@ func readKey(r *bufio.Reader) (string, error) {
 			return "right", nil
 		case "[D":
 			return "left", nil
+		case "[Z":
+			return "shift_tab", nil
 		default:
 			if strings.HasPrefix(seq, "[<64;") {
 				return "up", nil
@@ -1287,6 +1708,8 @@ func readKey(r *bufio.Reader) (string, error) {
 	switch b {
 	case '\r', '\n':
 		return "enter", nil
+	case '\t':
+		return "tab", nil
 	case 127, 8:
 		return "backspace", nil
 	case '/':

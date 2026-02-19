@@ -87,7 +87,7 @@ func TestDetailExpandCollapse(t *testing.T) {
 func TestDefaultStatusFilterOpen(t *testing.T) {
 	sqlite := newTUIDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
-	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,updated_at) VALUES('2','t_BBBBBB','Completed row','completed','later',"+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,updated_at) VALUES('3','t_CCCCCC','Completed row','completed','later',"+db.Quote(now)+");")
 	m := testModel(sqlite)
 	rendered, err := m.render(120, 22)
 	if err != nil {
@@ -119,6 +119,64 @@ func TestFuzzyFilterLiveTyping(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("expected row filtered out after non-matching key")
+	}
+}
+
+func TestTagFilterMultiAnd(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Tags = []string{"Bugs", "Deep Work"}
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected no rows for strict multi-tag AND, got %d", len(rows))
+	}
+	m.filters.Tags = []string{"Bugs"}
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected rows for single tag")
+	}
+}
+
+func TestTodayModeMineVsAll(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.view = "today"
+	m.currentUserHint = "human"
+	m.filters.TodayMode = "mine"
+	panelMine, err := m.render(120, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(panelMine, "Write deep focus memo") {
+		t.Fatalf("mine mode should hide non-matching assignee tasks")
+	}
+	m.filters.TodayMode = "all"
+	panelAll, err := m.render(120, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(panelAll, "Write deep focus memo") {
+		t.Fatalf("all mode should show all scheduled today tasks")
+	}
+}
+
+func TestFilterFocusTabMoves(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	start := m.filterFocus
+	m.handleKey("tab")
+	if m.filterFocus == start {
+		t.Fatalf("expected tab to advance filter focus")
+	}
+	m.handleKey("shift_tab")
+	if m.filterFocus != start {
+		t.Fatalf("expected shift_tab to restore filter focus")
 	}
 }
 
@@ -167,12 +225,17 @@ CREATE TABLE collections(
 	scheduled := now.Add(-2 * time.Hour).Format(time.RFC3339)
 	updated := now.Format(time.RFC3339)
 	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u1','Human Demo','active');")
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u2','Agent Demo','active');")
 	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c1','c_P1','Project Atlas','project','#7AB8FF',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c2','c_T1','Bugs','tag','#FF9AA2',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c3','c_T2','Deep Work','tag','#A2D2FF',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('1','t_AAAAAA','Critical fix title','open','now',"+db.Quote(due)+","+db.Quote(scheduled)+","+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('2','t_BBBBBB','Write deep focus memo','open','soon',"+db.Quote(due)+","+db.Quote(now.Format(time.RFC3339))+","+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c1');")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c2');")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('2','c3');")
 	mustExec(t, sqlite, "INSERT INTO task_assignees(task_id,user_id) VALUES('1','u1');")
+	mustExec(t, sqlite, "INSERT INTO task_assignees(task_id,user_id) VALUES('2','u2');")
 	return sqlite
 }
 

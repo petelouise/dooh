@@ -82,8 +82,13 @@ TUI controls:
 - `right`: expand selected task inline
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
+- `Tab` / `Shift+Tab`: move focus between filter fields
+- `f`: edit text filter
+- `g`: edit tags filter (typeahead + counts, multi-tag AND)
+- `a`: edit assignee filter (typeahead + counts)
 - `s`: cycle status filter
 - `p`: cycle priority filter
+- `m`: toggle Today mode (`mine` / `all`) in Today view
 - `t`: randomize theme
 - `1`: task list view
 - `2`: project progress view
@@ -100,7 +105,8 @@ View headers are context-aware:
 TUI is currently read-focused:
 - no command bar workflow is required
 - filters are always visible at the top: text/status/priority/tag/assignee/scope
-- `today` view defaults to tasks assigned to the current user context (`DOOH_TUI_USER` or `DOOH_MODE` hint), with fallback to all today tasks if no match
+- `today` view defaults to tasks assigned to the current user context (`DOOH_TUI_USER` or `DOOH_MODE` hint)
+- toggle `mine/all` in Today view with `m`
 
 Task rows use status icons instead of a status text column:
 - `○` open
