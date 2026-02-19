@@ -73,12 +73,9 @@ type model struct {
 	scopeName  string
 	scopeColor string
 
-	editFilter   bool
-	filterDraft  string
-	editCommand  bool
-	commandDraft string
-	commandMsg   string
-	expandedID   string
+	editFilter  bool
+	filterDraft string
+	expandedID  string
 }
 
 func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, plain bool) error {
@@ -173,25 +170,6 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 }
 
 func (m *model) handleKey(key string) bool {
-	if m.editCommand {
-		switch key {
-		case "enter":
-			m.executeCommand(strings.TrimSpace(m.commandDraft))
-			m.editCommand = false
-		case "esc":
-			m.editCommand = false
-		case "backspace":
-			if len(m.commandDraft) > 0 {
-				m.commandDraft = m.commandDraft[:len(m.commandDraft)-1]
-			}
-		default:
-			if len(key) == 1 {
-				m.commandDraft += key
-			}
-		}
-		return false
-	}
-
 	if m.editFilter {
 		switch key {
 		case "enter", "esc":
@@ -230,9 +208,6 @@ func (m *model) handleKey(key string) bool {
 	case "/":
 		m.editFilter = true
 		m.filterDraft = m.filter
-	case ":":
-		m.editCommand = true
-		m.commandDraft = ""
 	case "s":
 		m.statusFilter = cycle([]string{"open", "all", "completed", "archived"}, m.statusFilter)
 		m.selected = 0
@@ -280,7 +255,6 @@ func (m *model) enterSelected() {
 		m.scopeName = r.Name
 		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
-		m.commandMsg = "scope project: " + r.Name
 	case "goals":
 		rows, err := m.loadProgressRows("goal")
 		if err != nil || len(rows) == 0 {
@@ -297,7 +271,6 @@ func (m *model) enterSelected() {
 		m.scopeName = r.Name
 		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
-		m.commandMsg = "scope goal: " + r.Name
 	case "assignees":
 		rows, err := m.loadAssigneeRows()
 		if err != nil || len(rows) == 0 {
@@ -314,96 +287,8 @@ func (m *model) enterSelected() {
 		m.scopeName = r.Name
 		m.scopeColor = ""
 		m.switchView("tasks")
-		m.commandMsg = "scope assignee: " + r.Name
 	default:
 		m.toggleExpand()
-	}
-}
-
-func (m *model) executeCommand(cmd string) {
-	if cmd == "" {
-		m.commandMsg = ""
-		return
-	}
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return
-	}
-	switch strings.ToLower(parts[0]) {
-	case "view":
-		if len(parts) < 2 {
-			m.commandMsg = "usage: view tasks|projects|goals|today|assignees"
-			return
-		}
-		v := strings.ToLower(parts[1])
-		if v == "task" {
-			v = "tasks"
-		}
-		if v == "project" {
-			v = "projects"
-		}
-		if v == "goal" {
-			v = "goals"
-		}
-		if v == "assignee" {
-			v = "assignees"
-		}
-		switch v {
-		case "tasks", "projects", "goals", "today", "assignees":
-			m.switchView(v)
-			m.commandMsg = "view: " + v
-		default:
-			m.commandMsg = "unknown view"
-		}
-	case "tag":
-		m.tagFilter = strings.TrimSpace(strings.TrimPrefix(cmd, parts[0]))
-		m.selected = 0
-		m.commandMsg = "tag filter: " + fallbackDash(m.tagFilter)
-	case "assignee":
-		m.assigneeFilter = strings.TrimSpace(strings.TrimPrefix(cmd, parts[0]))
-		m.selected = 0
-		m.commandMsg = "assignee filter: " + fallbackDash(m.assigneeFilter)
-	case "status":
-		if len(parts) < 2 {
-			m.commandMsg = "usage: status open|all|completed|archived"
-			return
-		}
-		v := strings.ToLower(parts[1])
-		if v != "open" && v != "all" && v != "completed" && v != "archived" {
-			m.commandMsg = "invalid status"
-			return
-		}
-		m.statusFilter = v
-		m.selected = 0
-		m.commandMsg = "status: " + v
-	case "priority":
-		if len(parts) < 2 {
-			m.commandMsg = "usage: priority all|now|soon|later"
-			return
-		}
-		v := strings.ToLower(parts[1])
-		if v != "all" && v != "now" && v != "soon" && v != "later" {
-			m.commandMsg = "invalid priority"
-			return
-		}
-		m.priorityFilter = v
-		m.selected = 0
-		m.commandMsg = "priority: " + v
-	case "scope":
-		if len(parts) >= 2 && strings.ToLower(parts[1]) == "clear" {
-			m.scopeKind, m.scopeID, m.scopeName = "", "", ""
-			m.scopeColor = ""
-			m.commandMsg = "scope cleared"
-			return
-		}
-		m.commandMsg = "usage: scope clear"
-	case "clear":
-		m.clearFiltersAndScope()
-		m.commandMsg = "cleared"
-	case "help":
-		m.commandMsg = "cmd: view, tag, assignee, status, priority, scope clear, clear"
-	default:
-		m.commandMsg = "unknown command"
 	}
 }
 
@@ -485,12 +370,12 @@ func (m *model) render(cols int, lines int) (string, error) {
 		bodyBudget = m.limit
 	}
 
-	scope := ""
+	scope := "all"
 	if m.scopeKind != "" {
-		scope = " scope=" + m.scopeKind + ":" + m.scopeName
+		scope = m.scopeKind + ":" + m.scopeName
 	}
-	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s%s  filter=/%s", m.themes[m.themeIndex].Name, m.view, scope, m.activeFilter())
-	filterLine := fmt.Sprintf("status=%s priority=%s tag=%s assignee=%s", m.statusFilter, m.priorityFilter, fallbackDash(m.tagFilter), fallbackDash(m.assigneeFilter))
+	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s", m.themes[m.themeIndex].Name, m.view)
+	filterLine := fmt.Sprintf("FILTERS  [text:%s] [status:%s] [priority:%s] [tag:%s] [assignee:%s] [scope:%s]", fallbackDash(m.activeFilter()), m.statusFilter, m.priorityFilter, fallbackDash(m.tagFilter), fallbackDash(m.assigneeFilter), scope)
 	banner := bannerText(m.view, m.scopeKind, m.scopeName)
 	bannerLine := centerText("["+banner+"]", cols)
 
@@ -510,16 +395,12 @@ func (m *model) render(cols int, lines int) (string, error) {
 	}
 
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
-	if m.editCommand {
-		frame = append(frame, clampLine(":"+m.commandDraft, cols))
-	} else if m.editFilter {
+	if m.editFilter {
 		frame = append(frame, clampLine("filter> "+m.filterDraft+" (live fuzzy; Enter/Esc close)", cols))
-	} else if m.commandMsg != "" {
-		frame = append(frame, clampLine(selectedLine+" | "+m.commandMsg, cols))
 	} else {
 		frame = append(frame, clampLine(selectedLine, cols))
 	}
-	frame = append(frame, clampLine("keys: arrows, Enter open/expand, / filter, : command, s status, p priority, c clear, t random theme, 1-5 views, q quit", cols))
+	frame = append(frame, clampLine("keys: arrows, Enter open/expand, / filter, s status, p priority, c clear, t random theme, 1-5 views, q quit", cols))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -541,13 +422,12 @@ func (m *model) renderHeader(cols int, p palette) string {
 	}
 	priorityW := 8
 	scheduledW := 17
-	idW := 8
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
 	}
-	h := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s  %-*s", " ", " ", "D", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled", idW, "ID")
+	h := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s", " ", " ", "D", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled")
 	return m.paintMuted(clampLine(h, cols), p)
 }
 
@@ -651,15 +531,22 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time, p palette) []string {
 	priorityW := 8
 	scheduledW := 17
-	idW := 8
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW)
 	if titleW < 16 {
 		titleW = 16
 	}
+	selectedExtra := 0
+	if m.selected >= 0 && m.selected < len(rows) && m.expandedID == rows[m.selected].ID && (m.view == "tasks" || m.view == "today") {
+		selectedExtra = m.detailLineCount(rows[m.selected], cols, now)
+	}
 	start := 0
-	if m.selected >= budget {
-		start = m.selected - budget + 1
+	maxSelectedPos := budget - 1 - selectedExtra
+	if maxSelectedPos < 0 {
+		maxSelectedPos = 0
+	}
+	if m.selected > maxSelectedPos {
+		start = m.selected - maxSelectedPos
 	}
 	if start < 0 {
 		start = 0
@@ -673,14 +560,13 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 		}
 		icon := statusIcon(r.Status)
 		dueFlag := dueFlagIcon(r, now, m.loc)
-		rowLine := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s  %-*s",
+		rowLine := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s",
 			icon,
 			mark,
 			dueFlag,
 			titleW, clampLine(r.Title, titleW),
 			priorityW, r.Priority,
 			scheduledW, NaturalDate(r.Scheduled, m.loc, now),
-			idW, r.ID,
 		)
 		line := clampLine(rowLine, cols)
 		line = m.paintStatusMarker(line, icon, r.Status, p)
@@ -696,11 +582,11 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 				"due: " + NaturalDate(r.DueAt, m.loc, now),
 				"scheduled: " + NaturalDate(r.Scheduled, m.loc, now),
 				"updated: " + NaturalDate(r.UpdatedAt, m.loc, now),
-				"projects: " + strings.TrimSpace(r.Projects),
-				"goals: " + strings.TrimSpace(r.Goals),
-				"areas: " + strings.TrimSpace(r.Areas),
-				"groups: " + strings.TrimSpace(r.Groups),
-				"tags: " + strings.TrimSpace(r.Tags),
+				"projects: " + fallbackDash(strings.TrimSpace(r.Projects)),
+				"goals: " + fallbackDash(strings.TrimSpace(r.Goals)),
+				"areas: " + fallbackDash(strings.TrimSpace(r.Areas)),
+				"groups: " + fallbackDash(strings.TrimSpace(r.Groups)),
+				"tags: " + fallbackDash(strings.TrimSpace(r.Tags)),
 				"assignees: " + strings.TrimSpace(r.Assignees),
 			}
 			for _, d := range detail {
@@ -708,7 +594,7 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 					if len(lines) >= budget {
 						break
 					}
-					lines = append(lines, clampLine("    "+wrapped, cols))
+					lines = append(lines, m.paintCollectionLine(clampLine("    "+wrapped, cols), p))
 				}
 				if len(lines) >= budget {
 					break
@@ -1125,6 +1011,26 @@ func fallbackDash(v string) string {
 	return strings.TrimSpace(v)
 }
 
+func (m *model) detailLineCount(r row, cols int, now time.Time) int {
+	lines := []string{
+		"title: " + r.Title,
+		"due: " + NaturalDate(r.DueAt, m.loc, now),
+		"scheduled: " + NaturalDate(r.Scheduled, m.loc, now),
+		"updated: " + NaturalDate(r.UpdatedAt, m.loc, now),
+		"projects: " + fallbackDash(strings.TrimSpace(r.Projects)),
+		"goals: " + fallbackDash(strings.TrimSpace(r.Goals)),
+		"areas: " + fallbackDash(strings.TrimSpace(r.Areas)),
+		"groups: " + fallbackDash(strings.TrimSpace(r.Groups)),
+		"tags: " + fallbackDash(strings.TrimSpace(r.Tags)),
+		"assignees: " + fallbackDash(strings.TrimSpace(r.Assignees)),
+	}
+	total := 0
+	for _, d := range lines {
+		total += len(wrapText(d, cols-4))
+	}
+	return total
+}
+
 func bannerText(view string, scopeKind string, scopeName string) string {
 	if scopeKind == "project" && strings.TrimSpace(scopeName) != "" {
 		return "PROJECT: " + strings.ToUpper(scopeName)
@@ -1252,6 +1158,26 @@ func (m *model) paintHex(s string, hex string) string {
 		return s
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
+}
+
+func (m *model) paintCollectionLine(line string, p palette) string {
+	if m.plain {
+		return line
+	}
+	switch {
+	case strings.Contains(line, "projects:"):
+		return m.colorize(line, 81)
+	case strings.Contains(line, "goals:"):
+		return m.colorize(line, 186)
+	case strings.Contains(line, "areas:"):
+		return m.colorize(line, 180)
+	case strings.Contains(line, "groups:"):
+		return m.colorize(line, 152)
+	case strings.Contains(line, "tags:"):
+		return m.colorize(line, 117)
+	default:
+		return m.colorize(line, p.Muted)
+	}
 }
 
 func (m *model) paintSelected(s string, p palette) string {

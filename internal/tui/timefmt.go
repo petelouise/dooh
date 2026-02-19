@@ -22,14 +22,25 @@ func NaturalDate(ts string, loc *time.Location, now time.Time) string {
 	tY, tM, tD := t.Date()
 	nY, nM, nD := n.Date()
 	if tY == nY && tM == nM && tD == nD {
-		return "today " + t.Format("15:04")
+		return "today"
 	}
 	y := n.AddDate(0, 0, -1)
 	yY, yM, yD := y.Date()
 	if tY == yY && tM == yM && tD == yD {
-		return "yesterday " + t.Format("15:04")
+		return "yesterday"
 	}
-	return t.Format("02 Jan 2006 15:04")
+	tomorrow := n.AddDate(0, 0, 1)
+	oY, oM, oD := tomorrow.Date()
+	if tY == oY && tM == oM && tD == oD {
+		return "tomorrow"
+	}
+	nt := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
+	tt := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	diffDays := int(tt.Sub(nt).Hours() / 24)
+	if diffDays >= -6 && diffDays <= 6 {
+		return strings.ToLower(t.Weekday().String())
+	}
+	return t.Format("02 Jan 2006")
 }
 
 func parseTime(v string) (time.Time, bool) {

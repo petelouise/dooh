@@ -41,7 +41,7 @@ func TestColumnOrderTitleFirstIDLast(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(rendered, "\r\n"), "\r\n")
 	header := ""
 	for _, line := range lines {
-		if strings.Contains(line, "Title") && strings.Contains(line, "Priority") && strings.Contains(line, "Scheduled") && strings.Contains(line, "ID") {
+		if strings.Contains(line, "Title") && strings.Contains(line, "Priority") && strings.Contains(line, "Scheduled") {
 			header = line
 		}
 	}
@@ -49,8 +49,7 @@ func TestColumnOrderTitleFirstIDLast(t *testing.T) {
 		t.Fatalf("missing table header in frame")
 	}
 	if !(strings.Index(header, "Title") < strings.Index(header, "Priority") &&
-		strings.Index(header, "Priority") < strings.Index(header, "Scheduled") &&
-		strings.Index(header, "Scheduled") < strings.Index(header, "ID")) {
+		strings.Index(header, "Priority") < strings.Index(header, "Scheduled")) {
 		t.Fatalf("unexpected column order: %q", header)
 	}
 	if !strings.Contains(rendered, "○") {
