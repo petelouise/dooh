@@ -95,7 +95,7 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 		{"Prepare launch checklist", "later", "open", 7, 5, humanID, []string{humanID, partnerID}, []int{2, 3, 5, 11}},
 		{"Backfill docs for rollback flow", "soon", "open", 5, 3, agentID, []string{agentID}, []int{2, 3, 11}},
 		{"Draft onboarding playbook", "soon", "open", 2, 0, partnerID, []string{partnerID}, []int{2, 4, 8, 11}},
-		{"Fix weekend rollover bug", "now", "open", 1, 0, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
+		{"Fix weekend rollover bug", "now", "open", -2, -1, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
 		{"Home network backup audit", "later", "open", 6, 0, humanID, []string{humanID}, []int{4, 6, 8}},
 		{"Pay quarterly cloud invoices", "later", "completed", -1, -1, humanID, []string{humanID}, []int{5, 8}},
 		{"Review agent prompt safety", "now", "open", 1, 0, humanID, []string{humanID, partnerID}, []int{0, 3, 5, 11}},

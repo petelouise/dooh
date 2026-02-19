@@ -94,10 +94,23 @@ TUI controls:
 - `c`: clear all filters back to defaults (`status=open`, `priority=all`, empty text)
 - `q`: quit
 
+View headers are context-aware:
+- big section headers for `ALL TASKS`, `PROJECTS`, `GOALS`, `TODAY`, `ASSIGNEES`
+- when scoped from a project/goal row via `Enter`, header shows that specific project/goal name
+
 Task rows use status icons instead of a status text column:
 - `○` open
 - `✓` completed
 - `✕` archived
+- `⚑` due date exists
+- `!` overdue open task (highlighted)
+
+Task table columns:
+- `status icon`, `selection`, `due flag`, `title`, `priority`, `scheduled`, `id`
+- `updated` is shown in the bottom status/detail bar
+
+Expanded task details are split by collection type:
+- `projects`, `goals`, `areas`, `groups`, `tags`, `assignees`
 
 Timestamps in TUI use natural format:
 - `today 12:35`
