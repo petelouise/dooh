@@ -82,7 +82,6 @@ TUI controls:
 - `right`: expand selected task inline
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
-- `:` command bar (examples: `view goals`, `tag bugs`, `assignee Human`, `scope clear`, `clear`)
 - `s`: cycle status filter
 - `p`: cycle priority filter
 - `t`: randomize theme
@@ -98,6 +97,10 @@ View headers are context-aware:
 - big section headers for `ALL TASKS`, `PROJECTS`, `GOALS`, `TODAY`, `ASSIGNEES`
 - when scoped from a project/goal row via `Enter`, header shows that specific project/goal name
 
+TUI is currently read-focused:
+- no command bar workflow is required
+- filters are always visible at the top: text/status/priority/tag/assignee/scope
+
 Task rows use status icons instead of a status text column:
 - `○` open
 - `✓` completed
@@ -106,16 +109,18 @@ Task rows use status icons instead of a status text column:
 - `!` overdue open task (highlighted)
 
 Task table columns:
-- `status icon`, `selection`, `due flag`, `title`, `priority`, `scheduled`, `id`
+- `status icon`, `selection`, `due flag`, `title`, `priority`, `scheduled`
 - `updated` is shown in the bottom status/detail bar
 
 Expanded task details are split by collection type:
 - `projects`, `goals`, `areas`, `groups`, `tags`, `assignees`
 
 Timestamps in TUI use natural format:
-- `today 12:35`
-- `yesterday 22:00`
-- `03 Feb 2026 05:21`
+- `today`
+- `tomorrow`
+- `yesterday`
+- weekday names inside a 7-day window (e.g. `monday`)
+- `03 Feb 2026` for dates outside that window
 
 Fallback behavior:
 - interactive mode uses conservative cbreak (`stty -icanon -echo min 1 time 0`)

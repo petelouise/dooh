@@ -107,6 +107,13 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 	for _, t := range tasks {
 		due := now.AddDate(0, 0, t.DaysDue).Format(time.RFC3339)
 		sch := now.AddDate(0, 0, t.DaysSch).Format(time.RFC3339)
+		if hasGoalCollection(t.Collection) {
+			// Keep due dates on a minority of goal-linked tasks.
+			titleLower := strings.ToLower(t.Title)
+			if !strings.Contains(titleLower, "checklist") && !strings.Contains(titleLower, "migration") {
+				due = ""
+			}
+		}
 		taskID, created, err := ensureTask(sqlite, t.Title, t.Priority, t.Status, due, sch, t.Owner)
 		if err != nil {
 			return res, err
@@ -130,6 +137,15 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 	}
 
 	return res, nil
+}
+
+func hasGoalCollection(indices []int) bool {
+	for _, idx := range indices {
+		if idx == 3 || idx == 4 {
+			return true
+		}
+	}
+	return false
 }
 
 func ensureUser(sqlite db.SQLite, name string) (id string, created bool, err error) {
