@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -14,22 +15,27 @@ import (
 )
 
 type row struct {
-	ID         string
-	Title      string
-	Status     string
-	Priority   string
-	DueAt      string
-	Scheduled  string
-	UpdatedAt  string
-	Collection string
+	ID          string
+	Title       string
+	Status      string
+	Priority    string
+	DueAt       string
+	Scheduled   string
+	UpdatedAt   string
+	Collection  string
+	Tags        string
+	Assignees   string
+	ProjectIDs  string
+	GoalIDs     string
+	AssigneeIDs string
 }
 
 type progressRow struct {
-	ID    string
-	Name  string
-	Total int
-	Done  int
-	Open  int
+	ID        string
+	Name      string
+	Completed int
+	Remaining int
+	Total     int
 }
 
 type palette struct {
@@ -48,15 +54,25 @@ type model struct {
 	filter         string
 	statusFilter   string
 	priorityFilter string
+	tagFilter      string
+	assigneeFilter string
 	selected       int
 	limit          int
 	loc            *time.Location
 	plain          bool
 	view           string
+	rng            *rand.Rand
 
-	editFilter  bool
-	filterDraft string
-	expandedID  string
+	scopeKind string
+	scopeID   string
+	scopeName string
+
+	editFilter   bool
+	filterDraft  string
+	editCommand  bool
+	commandDraft string
+	commandMsg   string
+	expandedID   string
 }
 
 func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, plain bool) error {
@@ -134,6 +150,7 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 	if loc == nil {
 		loc = time.Local
 	}
+	seed := time.Now().UnixNano()
 	return model{
 		sqlite:         sqlite,
 		themes:         catalog.Themes,
@@ -145,17 +162,34 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		loc:            loc,
 		plain:          plain,
 		view:           "tasks",
+		rng:            rand.New(rand.NewSource(seed)),
 	}
 }
 
 func (m *model) handleKey(key string) bool {
-	if m.editFilter {
+	if m.editCommand {
 		switch key {
 		case "enter":
-			m.editFilter = false
+			m.executeCommand(strings.TrimSpace(m.commandDraft))
+			m.editCommand = false
 		case "esc":
+			m.editCommand = false
+		case "backspace":
+			if len(m.commandDraft) > 0 {
+				m.commandDraft = m.commandDraft[:len(m.commandDraft)-1]
+			}
+		default:
+			if len(key) == 1 {
+				m.commandDraft += key
+			}
+		}
+		return false
+	}
+
+	if m.editFilter {
+		switch key {
+		case "enter", "esc":
 			m.editFilter = false
-			m.filterDraft = m.filter
 		case "backspace":
 			if len(m.filterDraft) > 0 {
 				m.filterDraft = m.filterDraft[:len(m.filterDraft)-1]
@@ -185,9 +219,14 @@ func (m *model) handleKey(key string) bool {
 		}
 	case "left":
 		m.expandedID = ""
+	case "enter":
+		m.enterSelected()
 	case "/":
 		m.editFilter = true
 		m.filterDraft = m.filter
+	case ":":
+		m.editCommand = true
+		m.commandDraft = ""
 	case "s":
 		m.statusFilter = cycle([]string{"open", "all", "completed", "archived"}, m.statusFilter)
 		m.selected = 0
@@ -197,16 +236,9 @@ func (m *model) handleKey(key string) bool {
 		m.selected = 0
 		m.expandedID = ""
 	case "c":
-		m.filter = ""
-		m.filterDraft = ""
-		m.statusFilter = "open"
-		m.priorityFilter = "all"
-		m.selected = 0
-		m.expandedID = ""
+		m.clearFiltersAndScope()
 	case "t":
-		if len(m.themes) > 0 {
-			m.themeIndex = (m.themeIndex + 1) % len(m.themes)
-		}
+		m.randomizeTheme()
 	case "1":
 		m.switchView("tasks")
 	case "2":
@@ -215,8 +247,179 @@ func (m *model) handleKey(key string) bool {
 		m.switchView("goals")
 	case "4":
 		m.switchView("today")
+	case "5":
+		m.switchView("assignees")
+	}
+	if m.selected < 0 {
+		m.selected = 0
 	}
 	return false
+}
+
+func (m *model) enterSelected() {
+	switch m.view {
+	case "projects":
+		rows, err := m.loadProgressRows("project")
+		if err != nil || len(rows) == 0 {
+			return
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			return
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		r := rows[m.selected]
+		m.scopeKind = "project"
+		m.scopeID = r.ID
+		m.scopeName = r.Name
+		m.switchView("tasks")
+		m.commandMsg = "scope project: " + r.Name
+	case "goals":
+		rows, err := m.loadProgressRows("goal")
+		if err != nil || len(rows) == 0 {
+			return
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			return
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		r := rows[m.selected]
+		m.scopeKind = "goal"
+		m.scopeID = r.ID
+		m.scopeName = r.Name
+		m.switchView("tasks")
+		m.commandMsg = "scope goal: " + r.Name
+	case "assignees":
+		rows, err := m.loadAssigneeRows()
+		if err != nil || len(rows) == 0 {
+			return
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			return
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		r := rows[m.selected]
+		m.scopeKind = "assignee"
+		m.scopeID = r.ID
+		m.scopeName = r.Name
+		m.switchView("tasks")
+		m.commandMsg = "scope assignee: " + r.Name
+	default:
+		m.toggleExpand()
+	}
+}
+
+func (m *model) executeCommand(cmd string) {
+	if cmd == "" {
+		m.commandMsg = ""
+		return
+	}
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return
+	}
+	switch strings.ToLower(parts[0]) {
+	case "view":
+		if len(parts) < 2 {
+			m.commandMsg = "usage: view tasks|projects|goals|today|assignees"
+			return
+		}
+		v := strings.ToLower(parts[1])
+		if v == "task" {
+			v = "tasks"
+		}
+		if v == "project" {
+			v = "projects"
+		}
+		if v == "goal" {
+			v = "goals"
+		}
+		if v == "assignee" {
+			v = "assignees"
+		}
+		switch v {
+		case "tasks", "projects", "goals", "today", "assignees":
+			m.switchView(v)
+			m.commandMsg = "view: " + v
+		default:
+			m.commandMsg = "unknown view"
+		}
+	case "tag":
+		m.tagFilter = strings.TrimSpace(strings.TrimPrefix(cmd, parts[0]))
+		m.selected = 0
+		m.commandMsg = "tag filter: " + fallbackDash(m.tagFilter)
+	case "assignee":
+		m.assigneeFilter = strings.TrimSpace(strings.TrimPrefix(cmd, parts[0]))
+		m.selected = 0
+		m.commandMsg = "assignee filter: " + fallbackDash(m.assigneeFilter)
+	case "status":
+		if len(parts) < 2 {
+			m.commandMsg = "usage: status open|all|completed|archived"
+			return
+		}
+		v := strings.ToLower(parts[1])
+		if v != "open" && v != "all" && v != "completed" && v != "archived" {
+			m.commandMsg = "invalid status"
+			return
+		}
+		m.statusFilter = v
+		m.selected = 0
+		m.commandMsg = "status: " + v
+	case "priority":
+		if len(parts) < 2 {
+			m.commandMsg = "usage: priority all|now|soon|later"
+			return
+		}
+		v := strings.ToLower(parts[1])
+		if v != "all" && v != "now" && v != "soon" && v != "later" {
+			m.commandMsg = "invalid priority"
+			return
+		}
+		m.priorityFilter = v
+		m.selected = 0
+		m.commandMsg = "priority: " + v
+	case "scope":
+		if len(parts) >= 2 && strings.ToLower(parts[1]) == "clear" {
+			m.scopeKind, m.scopeID, m.scopeName = "", "", ""
+			m.commandMsg = "scope cleared"
+			return
+		}
+		m.commandMsg = "usage: scope clear"
+	case "clear":
+		m.clearFiltersAndScope()
+		m.commandMsg = "cleared"
+	case "help":
+		m.commandMsg = "cmd: view, tag, assignee, status, priority, scope clear, clear"
+	default:
+		m.commandMsg = "unknown command"
+	}
+}
+
+func (m *model) clearFiltersAndScope() {
+	m.filter = ""
+	m.filterDraft = ""
+	m.statusFilter = "open"
+	m.priorityFilter = "all"
+	m.tagFilter = ""
+	m.assigneeFilter = ""
+	m.scopeKind = ""
+	m.scopeID = ""
+	m.scopeName = ""
+	m.selected = 0
+	m.expandedID = ""
+}
+
+func (m *model) randomizeTheme() {
+	if len(m.themes) <= 1 {
+		return
+	}
+	next := m.themeIndex
+	for next == m.themeIndex {
+		next = m.rng.Intn(len(m.themes))
+	}
+	m.themeIndex = next
 }
 
 func (m *model) switchView(v string) {
@@ -261,7 +464,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 		return "", err
 	}
 
-	headerLines := 6
+	headerLines := 7
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
@@ -271,9 +474,16 @@ func (m *model) render(cols int, lines int) (string, error) {
 		bodyBudget = m.limit
 	}
 
+	scope := ""
+	if m.scopeKind != "" {
+		scope = " scope=" + m.scopeKind + ":" + m.scopeName
+	}
+	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s%s  filter=/%s", m.themes[m.themeIndex].Name, m.view, scope, m.activeFilter())
+	filterLine := fmt.Sprintf("status=%s priority=%s tag=%s assignee=%s", m.statusFilter, m.priorityFilter, fallbackDash(m.tagFilter), fallbackDash(m.assigneeFilter))
+
 	frame := make([]string, 0, lines)
-	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s  filter=/%s  status=%s  priority=%s", m.themes[m.themeIndex].Name, m.view, m.activeFilter(), m.statusFilter, m.priorityFilter)
 	frame = append(frame, m.paintAccent(clampLine(titleLine, cols), p.Accent))
+	frame = append(frame, m.paintMuted(clampLine(filterLine, cols), p))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, clampLine(renderTabs(cols, m.view), cols))
 	frame = append(frame, clampLine(countLine, cols))
@@ -286,12 +496,16 @@ func (m *model) render(cols int, lines int) (string, error) {
 	}
 
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
-	frame = append(frame, clampLine(selectedLine, cols))
-	if m.editFilter {
-		frame = append(frame, clampLine("filter> "+m.filterDraft+" (live fuzzy; Enter close, Esc close)", cols))
+	if m.editCommand {
+		frame = append(frame, clampLine(":"+m.commandDraft, cols))
+	} else if m.editFilter {
+		frame = append(frame, clampLine("filter> "+m.filterDraft+" (live fuzzy; Enter/Esc close)", cols))
+	} else if m.commandMsg != "" {
+		frame = append(frame, clampLine(selectedLine+" | "+m.commandMsg, cols))
 	} else {
-		frame = append(frame, clampLine("keys: arrows, / live filter, s status, p priority, c clear(all), t theme, 1 tasks, 2 projects, 3 goals, 4 today, q quit", cols))
+		frame = append(frame, clampLine(selectedLine, cols))
 	}
+	frame = append(frame, clampLine("keys: arrows, Enter open/expand, / filter, : command, s status, p priority, c clear, t random theme, 1-5 views, q quit", cols))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -303,30 +517,29 @@ func (m *model) render(cols int, lines int) (string, error) {
 }
 
 func (m *model) renderHeader(cols int, p palette) string {
-	if m.view == "projects" || m.view == "goals" {
-		nameW := cols - (2 + 2 + 18 + 5 + 4 + 4)
+	if m.view == "projects" || m.view == "goals" || m.view == "assignees" {
+		nameW := cols - (2 + 2 + 18 + 5 + 9 + 9)
 		if nameW < 18 {
 			nameW = 18
 		}
-		h := fmt.Sprintf("%-2s %-*s  %-18s  %-5s  %-4s  %-4s", "", nameW, "Name", "Progress", "%", "Done", "Open")
+		h := fmt.Sprintf("%-2s %-*s  %-18s  %-5s  %-9s  %-9s", "", nameW, "Name", "Progress", "%", "Completed", "Remaining")
 		return m.paintMuted(clampLine(h, cols), p)
 	}
-	iconW := 1
 	priorityW := 8
 	updatedW := 17
 	idW := 8
 	separatorW := 4
-	titleW := cols - (2 + separatorW + iconW + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
 	if titleW < 16 {
 		titleW = 16
 	}
-	h := fmt.Sprintf("%-2s %-*s  %-1s  %-*s  %-*s  %-*s", "", titleW, "Title", " ", priorityW, "Priority", updatedW, "Updated", idW, "ID")
+	h := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s", " ", " ", titleW, "Title", priorityW, "Priority", updatedW, "Updated", idW, "ID")
 	return m.paintMuted(clampLine(h, cols), p)
 }
 
 func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, string, error) {
 	now := time.Now()
-	headerLines := 6
+	headerLines := 7
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
@@ -344,12 +557,12 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 		rows = m.applyProgressFilter(rows)
 		if len(rows) == 0 {
 			m.selected = 0
-			return []string{"(no project rows)"}, "projects", "selected: none", nil
+			return []string{"(no project rows)"}, "projects=0", "selected: none", nil
 		}
 		m.selected = clampIndex(m.selected, len(rows))
-		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p)
+		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p, "project")
 		r := rows[m.selected]
-		selected := fmt.Sprintf("selected project: %s | completion=%d%% (%d/%d)", r.Name, pct(r.Done, r.Total), r.Done, r.Total)
+		selected := fmt.Sprintf("selected project: %s | completion=%d%% (%d completed, %d remaining)", r.Name, pct(r.Completed, r.Total), r.Completed, r.Remaining)
 		return linesOut, fmt.Sprintf("projects=%d", len(rows)), selected, nil
 	case "goals":
 		rows, err := m.loadProgressRows("goal")
@@ -359,13 +572,28 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 		rows = m.applyProgressFilter(rows)
 		if len(rows) == 0 {
 			m.selected = 0
-			return []string{"(no goal rows)"}, "goals", "selected: none", nil
+			return []string{"(no goal rows)"}, "goals=0", "selected: none", nil
 		}
 		m.selected = clampIndex(m.selected, len(rows))
-		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p)
+		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p, "goal")
 		r := rows[m.selected]
-		selected := fmt.Sprintf("selected goal: %s | completion=%d%% (%d/%d)", r.Name, pct(r.Done, r.Total), r.Done, r.Total)
+		selected := fmt.Sprintf("selected goal: %s | completion=%d%% (%d completed, %d remaining)", r.Name, pct(r.Completed, r.Total), r.Completed, r.Remaining)
 		return linesOut, fmt.Sprintf("goals=%d", len(rows)), selected, nil
+	case "assignees":
+		rows, err := m.loadAssigneeRows()
+		if err != nil {
+			return nil, "", "", err
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			m.selected = 0
+			return []string{"(no assignee rows)"}, "assignees=0", "selected: none", nil
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p, "assignee")
+		r := rows[m.selected]
+		selected := fmt.Sprintf("selected assignee: %s | completion=%d%% (%d completed, %d remaining)", r.Name, pct(r.Completed, r.Total), r.Completed, r.Remaining)
+		return linesOut, fmt.Sprintf("assignees=%d", len(rows)), selected, nil
 	case "today":
 		rows, err := m.filteredRows()
 		if err != nil {
@@ -380,13 +608,13 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 		if len(todayRows) == 0 {
 			m.selected = 0
 			m.expandedID = ""
-			return []string{"(no tasks scheduled today)"}, "today: scheduled=0", "selected: none", nil
+			return []string{"(no tasks scheduled today)"}, "today scheduled=0", "selected: none", nil
 		}
 		m.selected = clampIndex(m.selected, len(todayRows))
 		linesOut := m.composeTaskBody(todayRows, bodyBudget, cols, now, p)
 		r := todayRows[m.selected]
 		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
-		return linesOut, fmt.Sprintf("today: scheduled=%d", len(todayRows)), selected, nil
+		return linesOut, fmt.Sprintf("today scheduled=%d", len(todayRows)), selected, nil
 	default:
 		rows, err := m.filteredRows()
 		if err != nil {
@@ -407,12 +635,11 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 }
 
 func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time, p palette) []string {
-	iconW := 1
 	priorityW := 8
 	updatedW := 17
 	idW := 8
 	separatorW := 4
-	titleW := cols - (2 + separatorW + iconW + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
 	if titleW < 16 {
 		titleW = 16
 	}
@@ -431,10 +658,10 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 			mark = ">"
 		}
 		icon := statusIcon(r.Status)
-		rowLine := fmt.Sprintf("%-2s %-*s  %-1s  %-*s  %-*s  %-*s",
+		rowLine := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s",
+			icon,
 			mark,
 			titleW, clampLine(r.Title, titleW),
-			icon,
 			priorityW, r.Priority,
 			updatedW, NaturalDate(r.UpdatedAt, m.loc, now),
 			idW, r.ID,
@@ -453,6 +680,8 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 				"scheduled: " + NaturalDate(r.Scheduled, m.loc, now),
 				"updated: " + NaturalDate(r.UpdatedAt, m.loc, now),
 				"collections: " + strings.TrimSpace(r.Collection),
+				"tags: " + strings.TrimSpace(r.Tags),
+				"assignees: " + strings.TrimSpace(r.Assignees),
 			}
 			for _, d := range detail {
 				for _, wrapped := range wrapText(d, cols-4) {
@@ -470,8 +699,8 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 	return lines
 }
 
-func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p palette) []string {
-	nameW := cols - (2 + 2 + 18 + 5 + 4 + 4)
+func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p palette, kind string) []string {
+	nameW := cols - (2 + 2 + 18 + 5 + 9 + 9)
 	if nameW < 18 {
 		nameW = 18
 	}
@@ -483,15 +712,21 @@ func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p 
 		start = 0
 	}
 	lines := make([]string, 0, budget)
+	barCode := p.Accent
+	if kind == "goal" {
+		barCode = 220
+	}
+	if kind == "assignee" {
+		barCode = 81
+	}
 	for i := start; i < len(rows) && len(lines) < budget; i++ {
 		r := rows[i]
 		mark := " "
 		if i == m.selected {
 			mark = ">"
 		}
-		bar := progressBar(r.Done, r.Total, 18)
-		bar = m.paintAccent(bar, p.Accent)
-		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %4d  %4d", mark, nameW, clampLine(r.Name, nameW), bar, pct(r.Done, r.Total), r.Done, r.Open)
+		bar := m.paintAccent(progressBar(r.Completed, r.Total, 18), barCode)
+		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %9d  %9d", mark, nameW, clampLine(r.Name, nameW), bar, pct(r.Completed, r.Total), r.Completed, r.Remaining)
 		line = clampLine(line, cols)
 		if i == m.selected {
 			line = m.paintSelected(line, p)
@@ -511,10 +746,17 @@ SELECT
   COALESCE(t.due_at,''),
   COALESCE(t.scheduled_at,''),
   COALESCE(t.updated_at,''),
-  COALESCE(group_concat(c.name, ', '), '')
+  COALESCE(group_concat(DISTINCT c.name), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='tag' THEN c.name END), ''),
+  COALESCE(group_concat(DISTINCT u.name), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='project' THEN c.short_id END), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='goal' THEN c.short_id END), ''),
+  COALESCE(group_concat(DISTINCT u.id), '')
 FROM tasks t
 LEFT JOIN task_collections tc ON tc.task_id=t.id
 LEFT JOIN collections c ON c.id=tc.collection_id
+LEFT JOIN task_assignees ta ON ta.task_id=t.id
+LEFT JOIN users u ON u.id=ta.user_id
 WHERE t.deleted_at IS NULL
 GROUP BY t.id
 ORDER BY t.updated_at DESC;`)
@@ -523,10 +765,24 @@ ORDER BY t.updated_at DESC;`)
 	}
 	out := make([]row, 0, len(rows))
 	for _, r := range rows {
-		if len(r) < 8 {
+		if len(r) < 13 {
 			continue
 		}
-		out = append(out, row{ID: r[0], Title: r[1], Status: r[2], Priority: r[3], DueAt: r[4], Scheduled: r[5], UpdatedAt: r[6], Collection: r[7]})
+		out = append(out, row{
+			ID:          r[0],
+			Title:       r[1],
+			Status:      r[2],
+			Priority:    r[3],
+			DueAt:       r[4],
+			Scheduled:   r[5],
+			UpdatedAt:   r[6],
+			Collection:  r[7],
+			Tags:        r[8],
+			Assignees:   r[9],
+			ProjectIDs:  r[10],
+			GoalIDs:     r[11],
+			AssigneeIDs: r[12],
+		})
 	}
 	return out, nil
 }
@@ -536,9 +792,9 @@ func (m *model) loadProgressRows(kind string) ([]progressRow, error) {
 SELECT
   c.short_id,
   c.name,
-  COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0),
-  COALESCE(SUM(CASE WHEN t.status IN ('completed','archived') THEN 1 ELSE 0 END), 0),
-  COALESCE(SUM(CASE WHEN t.status='open' THEN 1 ELSE 0 END), 0)
+  COALESCE(SUM(CASE WHEN t.status='completed' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.status='open' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0)
 FROM collections c
 LEFT JOIN task_collections tc ON tc.collection_id=c.id
 LEFT JOIN tasks t ON t.id=tc.task_id AND t.deleted_at IS NULL
@@ -553,10 +809,40 @@ ORDER BY c.updated_at DESC, c.name ASC;`)
 		if len(r) < 5 {
 			continue
 		}
-		total, _ := strconv.Atoi(r[2])
-		done, _ := strconv.Atoi(r[3])
-		open, _ := strconv.Atoi(r[4])
-		out = append(out, progressRow{ID: r[0], Name: r[1], Total: total, Done: done, Open: open})
+		completed, _ := strconv.Atoi(r[2])
+		remaining, _ := strconv.Atoi(r[3])
+		total, _ := strconv.Atoi(r[4])
+		out = append(out, progressRow{ID: r[0], Name: r[1], Completed: completed, Remaining: remaining, Total: total})
+	}
+	return out, nil
+}
+
+func (m *model) loadAssigneeRows() ([]progressRow, error) {
+	rows, err := m.sqlite.QueryTSV(`
+SELECT
+  u.id,
+  u.name,
+  COALESCE(SUM(CASE WHEN t.status='completed' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.status='open' THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0)
+FROM users u
+LEFT JOIN task_assignees ta ON ta.user_id=u.id
+LEFT JOIN tasks t ON t.id=ta.task_id AND t.deleted_at IS NULL
+WHERE u.status='active'
+GROUP BY u.id
+ORDER BY u.name ASC;`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]progressRow, 0, len(rows))
+	for _, r := range rows {
+		if len(r) < 5 {
+			continue
+		}
+		completed, _ := strconv.Atoi(r[2])
+		remaining, _ := strconv.Atoi(r[3])
+		total, _ := strconv.Atoi(r[4])
+		out = append(out, progressRow{ID: r[0], Name: r[1], Completed: completed, Remaining: remaining, Total: total})
 	}
 	return out, nil
 }
@@ -578,8 +864,23 @@ func (m *model) applyFilters(in []row) []row {
 		if m.priorityFilter != "all" && r.Priority != m.priorityFilter {
 			continue
 		}
+		if m.tagFilter != "" && !fuzzyMatch(strings.ToLower(r.Tags), strings.ToLower(m.tagFilter)) {
+			continue
+		}
+		if m.assigneeFilter != "" && !fuzzyMatch(strings.ToLower(r.Assignees), strings.ToLower(m.assigneeFilter)) {
+			continue
+		}
+		if m.scopeKind == "project" && !containsToken(r.ProjectIDs, m.scopeID) {
+			continue
+		}
+		if m.scopeKind == "goal" && !containsToken(r.GoalIDs, m.scopeID) {
+			continue
+		}
+		if m.scopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.scopeID) {
+			continue
+		}
 		if f != "" {
-			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Status, r.Priority, r.Collection}, " "))
+			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Priority, r.Collection, r.Tags, r.Assignees}, " "))
 			if !fuzzyMatch(h, f) {
 				continue
 			}
@@ -691,7 +992,7 @@ func clampIndex(v int, count int) int {
 }
 
 func renderTabs(cols int, active string) string {
-	t := []string{"[1 tasks]", "[2 projects]", "[3 goals]", "[4 today]"}
+	t := []string{"[1 tasks]", "[2 projects]", "[3 goals]", "[4 today]", "[5 assignees]"}
 	s := strings.Join(t, "  ") + "  (active: " + active + ")"
 	return clampLine(s, cols)
 }
@@ -762,6 +1063,26 @@ func fuzzyMatch(hay, needle string) bool {
 	return j == len(n)
 }
 
+func containsToken(csv string, token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false
+	}
+	for _, p := range strings.Split(csv, ",") {
+		if strings.TrimSpace(p) == token {
+			return true
+		}
+	}
+	return false
+}
+
+func fallbackDash(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "-"
+	}
+	return strings.TrimSpace(v)
+}
+
 func paletteForTheme(id string) palette {
 	switch id {
 	case "sunset-pop":
@@ -823,27 +1144,29 @@ func readKey(r *bufio.Reader) (string, error) {
 		return "", err
 	}
 	if b == 0x1b {
-		b2, err := r.ReadByte()
+		seq, ok, err := readEscapeSequence(r)
 		if err != nil {
+			return "", err
+		}
+		if !ok {
 			return "esc", nil
 		}
-		if b2 != '[' {
-			return "esc", nil
-		}
-		b3, err := r.ReadByte()
-		if err != nil {
-			return "esc", nil
-		}
-		switch b3 {
-		case 'A':
+		switch seq {
+		case "[A":
 			return "up", nil
-		case 'B':
+		case "[B":
 			return "down", nil
-		case 'C':
+		case "[C":
 			return "right", nil
-		case 'D':
+		case "[D":
 			return "left", nil
 		default:
+			if strings.HasPrefix(seq, "[<64;") {
+				return "up", nil
+			}
+			if strings.HasPrefix(seq, "[<65;") {
+				return "down", nil
+			}
 			return "", nil
 		}
 	}
@@ -852,11 +1175,35 @@ func readKey(r *bufio.Reader) (string, error) {
 		return "enter", nil
 	case 127, 8:
 		return "backspace", nil
+	case ':', '/':
+		return string(b), nil
 	}
 	if b >= 32 && b <= 126 {
 		return string(b), nil
 	}
 	return "", nil
+}
+
+func readEscapeSequence(r *bufio.Reader) (string, bool, error) {
+	b, err := r.ReadByte()
+	if err != nil {
+		return "", false, nil
+	}
+	if b != '[' {
+		return "", false, nil
+	}
+	buf := []byte{'['}
+	for i := 0; i < 32; i++ {
+		next, err := r.ReadByte()
+		if err != nil {
+			return string(buf), true, nil
+		}
+		buf = append(buf, next)
+		if (next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z') || next == '~' {
+			break
+		}
+	}
+	return string(buf), true, nil
 }
 
 func isTTY() bool {

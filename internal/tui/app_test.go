@@ -140,22 +140,38 @@ CREATE TABLE tasks(
   updated_at TEXT,
   deleted_at TEXT
 );
+CREATE TABLE users(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL
+);
 CREATE TABLE task_collections(
   task_id TEXT NOT NULL,
   collection_id TEXT NOT NULL
 );
+CREATE TABLE task_assignees(
+  task_id TEXT NOT NULL,
+  user_id TEXT NOT NULL
+);
 CREATE TABLE collections(
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL
+  short_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  updated_at TEXT
 );
 `)
 	now := time.Now().UTC()
 	due := now.Add(24 * time.Hour).Format(time.RFC3339)
 	scheduled := now.Add(-2 * time.Hour).Format(time.RFC3339)
 	updated := now.Format(time.RFC3339)
-	mustExec(t, sqlite, "INSERT INTO collections(id,name) VALUES('c1','Project Atlas');")
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u1','Human Demo','active');")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,updated_at) VALUES('c1','c_P1','Project Atlas','project',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,updated_at) VALUES('c2','c_T1','Bugs','tag',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('1','t_AAAAAA','Critical fix title','open','now',"+db.Quote(due)+","+db.Quote(scheduled)+","+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c1');")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c2');")
+	mustExec(t, sqlite, "INSERT INTO task_assignees(task_id,user_id) VALUES('1','u1');")
 	return sqlite
 }
 
