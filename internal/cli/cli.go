@@ -952,6 +952,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	filter := fs.String("filter", "", "filter tasks by text")
 	limit := fs.Int("limit", 12, "max tasks to display")
 	static := fs.Bool("static", false, "render once and exit")
+	plain := fs.Bool("plain", false, "disable ANSI and render plain table")
 	dbPath := fs.String("db", "", "sqlite database path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -988,7 +989,15 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
 	if *static {
-		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc)
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, *plain)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprint(out, panel)
+		return nil
+	}
+	if *plain {
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, true)
 		if err != nil {
 			return err
 		}
@@ -996,14 +1005,14 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 		return nil
 	}
 	if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
-		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc)
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, true)
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprint(out, panel)
 		return nil
 	}
-	return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc)
+	return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc, false)
 }
 
 func resolveDB(rt runtime, flagVal string) string {

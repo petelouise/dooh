@@ -73,10 +73,13 @@ go run ./cmd/dooh db init --db ./dooh.db
 go run ./cmd/dooh demo seed --db ./dooh.db
 go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12
 go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --static
+go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --plain
 ```
 
 TUI controls:
-- `up/down` or `j/k`: move selection (no Enter required)
+- `up/down`: move selection (no Enter required)
+- `right`: expand selected task inline
+- `left`: collapse inline detail
 - `/`: edit filter (`Enter` apply, `Esc` cancel)
 - `s`: cycle status filter
 - `p`: cycle priority filter
@@ -88,6 +91,11 @@ Timestamps in TUI use natural format:
 - `today 12:35`
 - `yesterday 22:00`
 - `03 Feb 2026 05:21`
+
+Fallback behavior:
+- interactive mode uses conservative cbreak (`stty -icanon -echo min 1 time 0`)
+- if terminal capability checks fail (non-TTY, tiny width, mode switch failure), TUI falls back to plain static rendering
+- `--plain` forces plain rendering
 
 ## Theme presets
 ```bash
