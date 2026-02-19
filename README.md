@@ -76,10 +76,11 @@ go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --static
 ```
 
 TUI controls:
-- `up/down` or `j/k`: move selection
+- `up/down` or `j/k`: move selection (no Enter required)
 - `/`: edit filter (`Enter` apply, `Esc` cancel)
 - `s`: cycle status filter
 - `p`: cycle priority filter
+- `t`: cycle theme accent
 - `c`: clear filter
 - `q`: quit
 

@@ -26,7 +26,8 @@ type row struct {
 
 type model struct {
 	sqlite         db.SQLite
-	theme          Theme
+	themes         []Theme
+	themeIndex     int
 	filter         string
 	statusFilter   string
 	priorityFilter string
@@ -37,41 +38,23 @@ type model struct {
 	filterDraft    string
 }
 
-func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int, loc *time.Location) (string, error) {
-	m := model{sqlite: sqlite, theme: theme, filter: strings.TrimSpace(filter), statusFilter: "all", priorityFilter: "all", limit: limit, loc: loc}
-	if m.limit <= 0 {
-		m.limit = 12
-	}
-	return m.render(120, 40)
-}
-
 func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location) error {
-	th := catalog.Themes[0]
-	for _, t := range catalog.Themes {
-		if t.ID == themeID {
-			th = t
-			break
-		}
-	}
-	m := model{sqlite: sqlite, theme: th, filter: strings.TrimSpace(filter), statusFilter: "all", priorityFilter: "all", limit: limit, loc: loc}
-	if m.limit <= 0 {
-		m.limit = 12
-	}
+	m := newModel(sqlite, catalog, themeID, filter, limit, loc)
 
 	restoreTTY, _ := setRawTTY()
 	defer restoreTTY()
-	_, _ = fmt.Fprint(out, "\x1b[?1049h")
-	defer func() { _, _ = fmt.Fprint(out, "\x1b[?1049l") }()
+	_, _ = fmt.Fprint(out, "\x1b[?1049h\x1b[?25l")
+	defer func() { _, _ = fmt.Fprint(out, "\x1b[?25h\x1b[?1049l") }()
 
 	r := bufio.NewReader(in)
 	for {
 		cols, rows := terminalSize()
-		ui, err := m.render(cols, rows)
+		rendered, err := m.render(cols, rows)
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprint(out, "\x1b[2J\x1b[H")
-		_, _ = fmt.Fprint(out, ui)
+		_, _ = fmt.Fprint(out, rendered)
 
 		key, err := readKey(r)
 		if err != nil {
@@ -87,92 +70,36 @@ func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog Theme
 	}
 }
 
-func (m *model) render(cols int, rows int) (string, error) {
-	if cols < 80 {
-		cols = 80
-	}
-	if rows < 20 {
-		rows = 20
-	}
+func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int, loc *time.Location) (string, error) {
+	catalog := ThemeCatalog{Themes: []Theme{theme}, Default: theme.ID}
+	m := newModel(sqlite, catalog, theme.ID, filter, limit, loc)
+	return m.render(120, 36)
+}
 
-	all, err := m.loadRows()
-	if err != nil {
-		return "", err
+func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location) model {
+	if limit <= 0 {
+		limit = 14
 	}
-	filtered := m.applyFilters(all)
-	if m.selected < 0 {
-		m.selected = 0
-	}
-	if m.selected >= len(filtered) && len(filtered) > 0 {
-		m.selected = len(filtered) - 1
-	}
-	if len(filtered) == 0 {
-		m.selected = 0
-	}
-
-	now := time.Now()
-	counts := countStatus(all)
-	header := fmt.Sprintf("dooh tui  theme=%s  filter=/%s  status=%s  priority=%s", m.theme.Name, m.filter, m.statusFilter, m.priorityFilter)
-
-	var b strings.Builder
-	b.WriteString(trimTo(header, cols) + "\n")
-	b.WriteString(strings.Repeat("-", cols) + "\n")
-	b.WriteString(fmt.Sprintf("open=%d  completed=%d  archived=%d\n", counts["open"], counts["completed"], counts["archived"]))
-	b.WriteString(strings.Repeat("-", cols) + "\n")
-
-	titleW := cols - 52
-	if titleW < 20 {
-		titleW = 20
-	}
-	b.WriteString(fmt.Sprintf("%-2s %-*s %-10s %-8s %-19s %-8s\n", "", titleW, "Title", "Status", "Priority", "Updated", "ID"))
-	b.WriteString(strings.Repeat("-", cols) + "\n")
-
-	visibleRows := rows - 14
-	if visibleRows < 5 {
-		visibleRows = 5
-	}
-	start := 0
-	if m.selected >= visibleRows {
-		start = m.selected - visibleRows + 1
-	}
-	end := start + visibleRows
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-
-	for i := start; i < end; i++ {
-		r := filtered[i]
-		mark := " "
-		if i == m.selected {
-			mark = ">"
+	idx := 0
+	for i, t := range catalog.Themes {
+		if t.ID == themeID {
+			idx = i
+			break
 		}
-		line := fmt.Sprintf("%-2s %-*s %-10s %-8s %-19s %-8s", mark, titleW, trimTo(r.Title, titleW), r.Status, r.Priority, NaturalDate(r.UpdatedAt, m.loc, now), r.ID)
-		b.WriteString(trimTo(line, cols) + "\n")
 	}
-	for i := end; i < start+visibleRows; i++ {
-		b.WriteString("\n")
+	if loc == nil {
+		loc = time.Local
 	}
-
-	b.WriteString(strings.Repeat("-", cols) + "\n")
-	if len(filtered) > 0 {
-		r := filtered[m.selected]
-		detail := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s",
-			r.Title,
-			NaturalDate(r.DueAt, m.loc, now),
-			NaturalDate(r.Scheduled, m.loc, now),
-			r.Collection,
-		)
-		b.WriteString(trimTo(detail, cols) + "\n")
-	} else {
-		b.WriteString("selected: none\n")
+	return model{
+		sqlite:         sqlite,
+		themes:         catalog.Themes,
+		themeIndex:     idx,
+		filter:         strings.TrimSpace(filter),
+		statusFilter:   "all",
+		priorityFilter: "all",
+		limit:          limit,
+		loc:            loc,
 	}
-
-	if m.editFilter {
-		b.WriteString(trimTo("filter> "+m.filterDraft+"  (Enter apply, Esc cancel)", cols) + "\n")
-	} else {
-		b.WriteString(trimTo("keys: up/down or j/k, / filter, s status, p priority, c clear, q quit", cols) + "\n")
-	}
-	return b.String(), nil
 }
 
 func (m *model) handle(key string) bool {
@@ -203,20 +130,136 @@ func (m *model) handle(key string) bool {
 		m.selected++
 	case "up", "k":
 		m.selected--
-	case "s":
-		m.statusFilter = cycle([]string{"all", "open", "completed", "archived"}, m.statusFilter)
-		m.selected = 0
-	case "p":
-		m.priorityFilter = cycle([]string{"all", "now", "soon", "later"}, m.priorityFilter)
-		m.selected = 0
 	case "/":
 		m.editFilter = true
 		m.filterDraft = m.filter
 	case "c":
 		m.filter = ""
 		m.selected = 0
+	case "s":
+		m.statusFilter = cycle([]string{"all", "open", "completed", "archived"}, m.statusFilter)
+		m.selected = 0
+	case "p":
+		m.priorityFilter = cycle([]string{"all", "now", "soon", "later"}, m.priorityFilter)
+		m.selected = 0
+	case "t", "right", "left":
+		if len(m.themes) > 0 {
+			delta := 1
+			if key == "left" {
+				delta = -1
+			}
+			m.themeIndex = (m.themeIndex + len(m.themes) + delta) % len(m.themes)
+		}
 	}
 	return false
+}
+
+func (m *model) render(cols int, lines int) (string, error) {
+	if cols < 72 {
+		cols = 72
+	}
+	if lines < 18 {
+		lines = 18
+	}
+	rows, err := m.loadRows()
+	if err != nil {
+		return "", err
+	}
+	rows = m.applyFilters(rows)
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	if m.selected >= len(rows) && len(rows) > 0 {
+		m.selected = len(rows) - 1
+	}
+	if len(rows) == 0 {
+		m.selected = 0
+	}
+
+	t := m.themes[m.themeIndex]
+	now := time.Now()
+	counts := countStatus(rows)
+
+	statusW := 10
+	priorityW := 8
+	updatedW := 17
+	idW := 8
+	// Keep generous safety margin to prevent wrapping in terminals with
+	// ambiguous width handling.
+	titleW := cols - 60
+	if titleW < 16 {
+		titleW = 16
+	}
+
+	visible := lines - 8
+	if visible < 6 {
+		visible = 6
+	}
+	if m.limit < visible {
+		visible = m.limit
+	}
+
+	start := 0
+	if m.selected >= visible {
+		start = m.selected - visible + 1
+	}
+	end := start + visible
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	var b strings.Builder
+	titleColor := colorForTheme(t.ID)
+	b.WriteString(color(titleColor, trimTo(fmt.Sprintf("dooh tui | theme=%s | filter=/%s | status=%s | priority=%s", t.Name, m.filter, m.statusFilter, m.priorityFilter), cols)) + "\n")
+	b.WriteString(strings.Repeat("-", cols) + "\n")
+	b.WriteString(trimTo(fmt.Sprintf("open=%d  completed=%d  archived=%d", counts["open"], counts["completed"], counts["archived"]), cols) + "\n")
+	b.WriteString(strings.Repeat("-", cols) + "\n")
+	b.WriteString(fmt.Sprintf("%-2s %-*s %-*s %-*s %-*s %-*s\n", "", titleW, "Title", statusW, "Status", priorityW, "Priority", updatedW, "Updated", idW, "ID"))
+	b.WriteString(strings.Repeat("-", cols) + "\n")
+
+	for i := start; i < end; i++ {
+		r := rows[i]
+		mark := " "
+		if i == m.selected {
+			mark = ">"
+		}
+		line := fmt.Sprintf("%-2s %-*s %-*s %-*s %-*s %-*s",
+			mark,
+			titleW, trimTo(r.Title, titleW),
+			statusW, r.Status,
+			priorityW, r.Priority,
+			updatedW, NaturalDate(r.UpdatedAt, m.loc, now),
+			idW, r.ID,
+		)
+		if i == m.selected {
+			b.WriteString(strings.Replace(line, ">", color(220, ">"), 1) + "\n")
+		} else {
+			b.WriteString(line + "\n")
+		}
+	}
+	for i := end; i < start+visible; i++ {
+		b.WriteString("\n")
+	}
+
+	b.WriteString(strings.Repeat("-", cols) + "\n")
+	if len(rows) > 0 {
+		r := rows[m.selected]
+		detail := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s",
+			r.Title,
+			NaturalDate(r.DueAt, m.loc, now),
+			NaturalDate(r.Scheduled, m.loc, now),
+			r.Collection,
+		)
+		b.WriteString(trimTo(detail, cols) + "\n")
+	} else {
+		b.WriteString("selected: none\n")
+	}
+	if m.editFilter {
+		b.WriteString(trimTo("filter> "+m.filterDraft+" (Enter apply, Esc cancel)", cols) + "\n")
+	} else {
+		b.WriteString(trimTo("keys: up/down or j/k, / filter, s status, p priority, t theme, c clear, q quit", cols) + "\n")
+	}
+	return b.String(), nil
 }
 
 func (m *model) loadRows() ([]row, error) {
@@ -249,10 +292,10 @@ ORDER BY t.updated_at DESC;`)
 	return out, nil
 }
 
-func (m *model) applyFilters(rows []row) []row {
+func (m *model) applyFilters(in []row) []row {
 	f := strings.ToLower(strings.TrimSpace(m.filter))
-	out := make([]row, 0, len(rows))
-	for _, r := range rows {
+	out := make([]row, 0, len(in))
+	for _, r := range in {
 		if m.statusFilter != "all" && r.Status != m.statusFilter {
 			continue
 		}
@@ -270,6 +313,14 @@ func (m *model) applyFilters(rows []row) []row {
 	return out
 }
 
+func countStatus(rows []row) map[string]int {
+	m := map[string]int{"open": 0, "completed": 0, "archived": 0}
+	for _, r := range rows {
+		m[r.Status]++
+	}
+	return m
+}
+
 func cycle(values []string, current string) string {
 	for i, v := range values {
 		if v == current {
@@ -280,14 +331,6 @@ func cycle(values []string, current string) string {
 		return current
 	}
 	return values[0]
-}
-
-func countStatus(rows []row) map[string]int {
-	m := map[string]int{"open": 0, "completed": 0, "archived": 0}
-	for _, r := range rows {
-		m[r.Status]++
-	}
-	return m
 }
 
 func trimTo(s string, n int) string {
@@ -301,6 +344,28 @@ func trimTo(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-3] + "..."
+}
+
+func color(code int, s string) string {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return s
+	}
+	return fmt.Sprintf("\x1b[38;5;%dm%s\x1b[0m", code, s)
+}
+
+func colorForTheme(id string) int {
+	switch id {
+	case "sunset-pop":
+		return 209
+	case "mint-circuit":
+		return 79
+	case "paper-fruit":
+		return 167
+	case "midnight-arcade":
+		return 45
+	default:
+		return 81
+	}
 }
 
 func readKey(r *bufio.Reader) (string, error) {
@@ -364,15 +429,15 @@ func setRawTTY() (func(), error) {
 
 func terminalSize() (int, int) {
 	cols := 120
-	rows := 40
+	lines := 36
 	if c := strings.TrimSpace(os.Getenv("COLUMNS")); c != "" {
 		if n, err := strconv.Atoi(c); err == nil && n > 0 {
 			cols = n
 		}
 	}
-	if r := strings.TrimSpace(os.Getenv("LINES")); r != "" {
-		if n, err := strconv.Atoi(r); err == nil && n > 0 {
-			rows = n
+	if l := strings.TrimSpace(os.Getenv("LINES")); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			lines = n
 		}
 	}
 	out, err := exec.Command("sh", "-c", "stty size </dev/tty").Output()
@@ -380,12 +445,12 @@ func terminalSize() (int, int) {
 		parts := strings.Fields(strings.TrimSpace(string(out)))
 		if len(parts) == 2 {
 			if n, e := strconv.Atoi(parts[0]); e == nil && n > 0 {
-				rows = n
+				lines = n
 			}
 			if n, e := strconv.Atoi(parts[1]); e == nil && n > 0 {
 				cols = n
 			}
 		}
 	}
-	return cols, rows
+	return cols, lines
 }
