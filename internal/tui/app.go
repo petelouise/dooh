@@ -28,11 +28,16 @@ type row struct {
 	ProjectIDs  string
 	GoalIDs     string
 	AssigneeIDs string
+	Projects    string
+	Goals       string
+	Areas       string
+	Groups      string
 }
 
 type progressRow struct {
 	ID        string
 	Name      string
+	ColorHex  string
 	Completed int
 	Remaining int
 	Total     int
@@ -63,9 +68,10 @@ type model struct {
 	view           string
 	rng            *rand.Rand
 
-	scopeKind string
-	scopeID   string
-	scopeName string
+	scopeKind  string
+	scopeID    string
+	scopeName  string
+	scopeColor string
 
 	editFilter   bool
 	filterDraft  string
@@ -272,6 +278,7 @@ func (m *model) enterSelected() {
 		m.scopeKind = "project"
 		m.scopeID = r.ID
 		m.scopeName = r.Name
+		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
 		m.commandMsg = "scope project: " + r.Name
 	case "goals":
@@ -288,6 +295,7 @@ func (m *model) enterSelected() {
 		m.scopeKind = "goal"
 		m.scopeID = r.ID
 		m.scopeName = r.Name
+		m.scopeColor = r.ColorHex
 		m.switchView("tasks")
 		m.commandMsg = "scope goal: " + r.Name
 	case "assignees":
@@ -304,6 +312,7 @@ func (m *model) enterSelected() {
 		m.scopeKind = "assignee"
 		m.scopeID = r.ID
 		m.scopeName = r.Name
+		m.scopeColor = ""
 		m.switchView("tasks")
 		m.commandMsg = "scope assignee: " + r.Name
 	default:
@@ -383,6 +392,7 @@ func (m *model) executeCommand(cmd string) {
 	case "scope":
 		if len(parts) >= 2 && strings.ToLower(parts[1]) == "clear" {
 			m.scopeKind, m.scopeID, m.scopeName = "", "", ""
+			m.scopeColor = ""
 			m.commandMsg = "scope cleared"
 			return
 		}
@@ -407,6 +417,7 @@ func (m *model) clearFiltersAndScope() {
 	m.scopeKind = ""
 	m.scopeID = ""
 	m.scopeName = ""
+	m.scopeColor = ""
 	m.selected = 0
 	m.expandedID = ""
 }
@@ -464,7 +475,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 		return "", err
 	}
 
-	headerLines := 7
+	headerLines := 8
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
@@ -480,9 +491,12 @@ func (m *model) render(cols int, lines int) (string, error) {
 	}
 	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s%s  filter=/%s", m.themes[m.themeIndex].Name, m.view, scope, m.activeFilter())
 	filterLine := fmt.Sprintf("status=%s priority=%s tag=%s assignee=%s", m.statusFilter, m.priorityFilter, fallbackDash(m.tagFilter), fallbackDash(m.assigneeFilter))
+	banner := bannerText(m.view, m.scopeKind, m.scopeName)
+	bannerLine := centerText("["+banner+"]", cols)
 
 	frame := make([]string, 0, lines)
 	frame = append(frame, m.paintAccent(clampLine(titleLine, cols), p.Accent))
+	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), p))
 	frame = append(frame, m.paintMuted(clampLine(filterLine, cols), p))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, clampLine(renderTabs(cols, m.view), cols))
@@ -526,20 +540,20 @@ func (m *model) renderHeader(cols int, p palette) string {
 		return m.paintMuted(clampLine(h, cols), p)
 	}
 	priorityW := 8
-	updatedW := 17
+	scheduledW := 17
 	idW := 8
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW + separatorW + idW)
 	if titleW < 16 {
 		titleW = 16
 	}
-	h := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s", " ", " ", titleW, "Title", priorityW, "Priority", updatedW, "Updated", idW, "ID")
+	h := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s  %-*s", " ", " ", "D", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled", idW, "ID")
 	return m.paintMuted(clampLine(h, cols), p)
 }
 
 func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, string, error) {
 	now := time.Now()
-	headerLines := 7
+	headerLines := 8
 	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
@@ -613,7 +627,7 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 		m.selected = clampIndex(m.selected, len(todayRows))
 		linesOut := m.composeTaskBody(todayRows, bodyBudget, cols, now, p)
 		r := todayRows[m.selected]
-		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
+		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | updated=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), NaturalDate(r.UpdatedAt, m.loc, now), r.Collection)
 		return linesOut, fmt.Sprintf("today scheduled=%d", len(todayRows)), selected, nil
 	default:
 		rows, err := m.filteredRows()
@@ -629,17 +643,17 @@ func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, 
 		counts := countStatus(rows)
 		linesOut := m.composeTaskBody(rows, bodyBudget, cols, now, p)
 		r := rows[m.selected]
-		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
+		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | updated=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), NaturalDate(r.UpdatedAt, m.loc, now), r.Collection)
 		return linesOut, fmt.Sprintf("open %d  completed %d  archived %d", counts["open"], counts["completed"], counts["archived"]), selected, nil
 	}
 }
 
 func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time, p palette) []string {
 	priorityW := 8
-	updatedW := 17
+	scheduledW := 17
 	idW := 8
 	separatorW := 4
-	titleW := cols - (1 + 1 + 1 + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	titleW := cols - (1 + 1 + 1 + separatorW + 1 + separatorW + priorityW + separatorW + scheduledW + separatorW + idW)
 	if titleW < 16 {
 		titleW = 16
 	}
@@ -658,16 +672,19 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 			mark = ">"
 		}
 		icon := statusIcon(r.Status)
-		rowLine := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s",
+		dueFlag := dueFlagIcon(r, now, m.loc)
+		rowLine := fmt.Sprintf("%-1s %-1s %-1s %-*s  %-*s  %-*s  %-*s",
 			icon,
 			mark,
+			dueFlag,
 			titleW, clampLine(r.Title, titleW),
 			priorityW, r.Priority,
-			updatedW, NaturalDate(r.UpdatedAt, m.loc, now),
+			scheduledW, NaturalDate(r.Scheduled, m.loc, now),
 			idW, r.ID,
 		)
 		line := clampLine(rowLine, cols)
 		line = m.paintStatusMarker(line, icon, r.Status, p)
+		line = m.paintDueMarker(line, dueFlag, r, now, p)
 		if i == m.selected {
 			line = m.paintSelected(line, p)
 		}
@@ -679,7 +696,10 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 				"due: " + NaturalDate(r.DueAt, m.loc, now),
 				"scheduled: " + NaturalDate(r.Scheduled, m.loc, now),
 				"updated: " + NaturalDate(r.UpdatedAt, m.loc, now),
-				"collections: " + strings.TrimSpace(r.Collection),
+				"projects: " + strings.TrimSpace(r.Projects),
+				"goals: " + strings.TrimSpace(r.Goals),
+				"areas: " + strings.TrimSpace(r.Areas),
+				"groups: " + strings.TrimSpace(r.Groups),
 				"tags: " + strings.TrimSpace(r.Tags),
 				"assignees: " + strings.TrimSpace(r.Assignees),
 			}
@@ -714,10 +734,10 @@ func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p 
 	lines := make([]string, 0, budget)
 	barCode := p.Accent
 	if kind == "goal" {
-		barCode = 220
+		barCode = 186
 	}
 	if kind == "assignee" {
-		barCode = 81
+		barCode = 110
 	}
 	for i := start; i < len(rows) && len(lines) < budget; i++ {
 		r := rows[i]
@@ -726,7 +746,14 @@ func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p 
 			mark = ">"
 		}
 		bar := m.paintAccent(progressBar(r.Completed, r.Total, 18), barCode)
-		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %9d  %9d", mark, nameW, clampLine(r.Name, nameW), bar, pct(r.Completed, r.Total), r.Completed, r.Remaining)
+		if strings.TrimSpace(r.ColorHex) != "" {
+			bar = m.paintHex(bar, r.ColorHex)
+		}
+		name := clampLine(r.Name, nameW)
+		if strings.TrimSpace(r.ColorHex) != "" {
+			name = m.paintHex(name, r.ColorHex)
+		}
+		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %9d  %9d", mark, nameW, name, bar, pct(r.Completed, r.Total), r.Completed, r.Remaining)
 		line = clampLine(line, cols)
 		if i == m.selected {
 			line = m.paintSelected(line, p)
@@ -751,7 +778,11 @@ SELECT
   COALESCE(group_concat(DISTINCT u.name), ''),
   COALESCE(group_concat(DISTINCT CASE WHEN c.kind='project' THEN c.short_id END), ''),
   COALESCE(group_concat(DISTINCT CASE WHEN c.kind='goal' THEN c.short_id END), ''),
-  COALESCE(group_concat(DISTINCT u.id), '')
+  COALESCE(group_concat(DISTINCT u.id), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='project' THEN c.name END), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='goal' THEN c.name END), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='area' THEN c.name END), ''),
+  COALESCE(group_concat(DISTINCT CASE WHEN c.kind='class' THEN c.name END), '')
 FROM tasks t
 LEFT JOIN task_collections tc ON tc.task_id=t.id
 LEFT JOIN collections c ON c.id=tc.collection_id
@@ -768,20 +799,30 @@ ORDER BY t.updated_at DESC;`)
 		if len(r) < 13 {
 			continue
 		}
+		col := func(i int) string {
+			if i < 0 || i >= len(r) {
+				return ""
+			}
+			return r[i]
+		}
 		out = append(out, row{
-			ID:          r[0],
-			Title:       r[1],
-			Status:      r[2],
-			Priority:    r[3],
-			DueAt:       r[4],
-			Scheduled:   r[5],
-			UpdatedAt:   r[6],
-			Collection:  r[7],
-			Tags:        r[8],
-			Assignees:   r[9],
-			ProjectIDs:  r[10],
-			GoalIDs:     r[11],
-			AssigneeIDs: r[12],
+			ID:          col(0),
+			Title:       col(1),
+			Status:      col(2),
+			Priority:    col(3),
+			DueAt:       col(4),
+			Scheduled:   col(5),
+			UpdatedAt:   col(6),
+			Collection:  col(7),
+			Tags:        col(8),
+			Assignees:   col(9),
+			ProjectIDs:  col(10),
+			GoalIDs:     col(11),
+			AssigneeIDs: col(12),
+			Projects:    col(13),
+			Goals:       col(14),
+			Areas:       col(15),
+			Groups:      col(16),
 		})
 	}
 	return out, nil
@@ -792,6 +833,7 @@ func (m *model) loadProgressRows(kind string) ([]progressRow, error) {
 SELECT
   c.short_id,
   c.name,
+  COALESCE(c.color_hex,''),
   COALESCE(SUM(CASE WHEN t.status='completed' THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE WHEN t.status='open' THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0)
@@ -806,13 +848,13 @@ ORDER BY c.updated_at DESC, c.name ASC;`)
 	}
 	out := make([]progressRow, 0, len(rows))
 	for _, r := range rows {
-		if len(r) < 5 {
+		if len(r) < 6 {
 			continue
 		}
-		completed, _ := strconv.Atoi(r[2])
-		remaining, _ := strconv.Atoi(r[3])
-		total, _ := strconv.Atoi(r[4])
-		out = append(out, progressRow{ID: r[0], Name: r[1], Completed: completed, Remaining: remaining, Total: total})
+		completed, _ := strconv.Atoi(r[3])
+		remaining, _ := strconv.Atoi(r[4])
+		total, _ := strconv.Atoi(r[5])
+		out = append(out, progressRow{ID: r[0], Name: r[1], ColorHex: r[2], Completed: completed, Remaining: remaining, Total: total})
 	}
 	return out, nil
 }
@@ -1083,6 +1125,59 @@ func fallbackDash(v string) string {
 	return strings.TrimSpace(v)
 }
 
+func bannerText(view string, scopeKind string, scopeName string) string {
+	if scopeKind == "project" && strings.TrimSpace(scopeName) != "" {
+		return "PROJECT: " + strings.ToUpper(scopeName)
+	}
+	if scopeKind == "goal" && strings.TrimSpace(scopeName) != "" {
+		return "GOAL: " + strings.ToUpper(scopeName)
+	}
+	switch view {
+	case "projects":
+		return "PROJECTS"
+	case "goals":
+		return "GOALS"
+	case "today":
+		return "TODAY"
+	case "assignees":
+		return "ASSIGNEES"
+	default:
+		return "ALL TASKS"
+	}
+}
+
+func centerText(s string, width int) string {
+	if width <= len(s) {
+		return s
+	}
+	pad := (width - len(s)) / 2
+	return strings.Repeat(" ", pad) + s
+}
+
+func dueFlagIcon(r row, now time.Time, loc *time.Location) string {
+	if strings.TrimSpace(r.DueAt) == "" {
+		return " "
+	}
+	if isOverdue(r, now, loc) {
+		return "!"
+	}
+	return "⚑"
+}
+
+func isOverdue(r row, now time.Time, loc *time.Location) bool {
+	if r.Status != "open" || strings.TrimSpace(r.DueAt) == "" {
+		return false
+	}
+	t, ok := parseTime(r.DueAt)
+	if !ok {
+		return false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	return t.In(loc).Before(now.In(loc))
+}
+
 func paletteForTheme(id string) palette {
 	switch id {
 	case "sunset-pop":
@@ -1109,6 +1204,13 @@ func (m *model) paintAccent(s string, code int) string {
 	return m.colorize(s, code)
 }
 
+func (m *model) paintBanner(s string, p palette) string {
+	if strings.TrimSpace(m.scopeColor) != "" {
+		return m.paintHex(s, m.scopeColor)
+	}
+	return m.paintAccent(s, p.Accent)
+}
+
 func (m *model) paintMuted(s string, p palette) string {
 	return m.colorize(s, p.Muted)
 }
@@ -1129,6 +1231,27 @@ func (m *model) paintStatusMarker(line string, marker string, status string, p p
 		return line
 	}
 	return strings.Replace(line, marker, m.paintStatus(marker, status, p), 1)
+}
+
+func (m *model) paintDueMarker(line string, marker string, r row, now time.Time, p palette) string {
+	if m.plain || strings.TrimSpace(marker) == "" {
+		return line
+	}
+	if marker == "!" || isOverdue(r, now, m.loc) {
+		return strings.Replace(line, marker, m.colorize(marker, 203), 1)
+	}
+	return strings.Replace(line, marker, m.colorize(marker, p.Warn), 1)
+}
+
+func (m *model) paintHex(s string, hex string) string {
+	if m.plain {
+		return s
+	}
+	r, g, b, ok := parseHexColor(hex)
+	if !ok {
+		return s
+	}
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
 }
 
 func (m *model) paintSelected(s string, p palette) string {
@@ -1204,6 +1327,21 @@ func readEscapeSequence(r *bufio.Reader) (string, bool, error) {
 		}
 	}
 	return string(buf), true, nil
+}
+
+func parseHexColor(v string) (int, int, int, bool) {
+	s := strings.TrimSpace(strings.TrimPrefix(v, "#"))
+	if len(s) != 6 {
+		return 0, 0, 0, false
+	}
+	n, err := strconv.ParseInt(s, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	r := int((n >> 16) & 0xFF)
+	g := int((n >> 8) & 0xFF)
+	b := int(n & 0xFF)
+	return r, g, b, true
 }
 
 func isTTY() bool {

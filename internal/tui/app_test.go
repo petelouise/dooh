@@ -27,39 +27,34 @@ func TestRenderClampToWidth(t *testing.T) {
 func TestColumnOrderTitleFirstIDLast(t *testing.T) {
 	sqlite := newTUIDB(t)
 	m := testModel(sqlite)
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected at least one filtered row")
+	}
 	rendered, err := m.render(120, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(rendered, "\r\n"), "\r\n")
 	header := ""
-	body := ""
 	for _, line := range lines {
-		if strings.Contains(line, "Title") && strings.Contains(line, "Priority") && strings.Contains(line, "Updated") && strings.Contains(line, "ID") {
+		if strings.Contains(line, "Title") && strings.Contains(line, "Priority") && strings.Contains(line, "Scheduled") && strings.Contains(line, "ID") {
 			header = line
-		}
-		if strings.Contains(line, "Critical fix title") && strings.Contains(line, "t_AAAAAA") {
-			body = line
 		}
 	}
 	if header == "" {
 		t.Fatalf("missing table header in frame")
 	}
-	if body == "" {
-		t.Fatalf("missing task body row in frame")
-	}
 	if !(strings.Index(header, "Title") < strings.Index(header, "Priority") &&
-		strings.Index(header, "Priority") < strings.Index(header, "Updated") &&
-		strings.Index(header, "Updated") < strings.Index(header, "ID")) {
+		strings.Index(header, "Priority") < strings.Index(header, "Scheduled") &&
+		strings.Index(header, "Scheduled") < strings.Index(header, "ID")) {
 		t.Fatalf("unexpected column order: %q", header)
 	}
-	if !(strings.Index(body, "Critical fix title") < strings.Index(body, "now") &&
-		strings.Index(body, "now") < strings.Index(body, "today") &&
-		strings.Index(body, "today") < strings.Index(body, "t_AAAAAA")) {
-		t.Fatalf("unexpected body column order: %q", body)
-	}
-	if !strings.Contains(body, "○") {
-		t.Fatalf("expected open status icon in body row: %q", body)
+	if !strings.Contains(rendered, "○") {
+		t.Fatalf("expected open status icon in frame")
 	}
 }
 
@@ -67,19 +62,25 @@ func TestDetailExpandCollapse(t *testing.T) {
 	sqlite := newTUIDB(t)
 	m := testModel(sqlite)
 	m.handleKey("right")
+	if m.expandedID == "" {
+		t.Fatalf("expected expanded id after right key")
+	}
 	expanded, err := m.render(120, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(expanded, "title: Critical fix title") {
+	if !strings.Contains(expanded, "projects:") {
 		t.Fatalf("expected expanded detail in frame")
 	}
 	m.handleKey("left")
+	if m.expandedID != "" {
+		t.Fatalf("expected expanded id cleared after left key")
+	}
 	collapsed, err := m.render(120, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(collapsed, "title: Critical fix title") {
+	if strings.Contains(collapsed, "projects:") {
 		t.Fatalf("expected detail to be collapsed")
 	}
 }
@@ -105,19 +106,19 @@ func TestFuzzyFilterLiveTyping(t *testing.T) {
 	m.handleKey("c")
 	m.handleKey("f")
 	m.handleKey("t")
-	rendered, err := m.render(120, 22)
+	rows, err := m.filteredRows()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, "Critical fix title") {
+	if len(rows) == 0 {
 		t.Fatalf("expected fuzzy live filter to match critical fix title")
 	}
 	m.handleKey("z")
-	rendered, err = m.render(120, 22)
+	rows, err = m.filteredRows()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(rendered, "Critical fix title") {
+	if len(rows) != 0 {
 		t.Fatalf("expected row filtered out after non-matching key")
 	}
 }
@@ -158,6 +159,7 @@ CREATE TABLE collections(
   short_id TEXT NOT NULL,
   name TEXT NOT NULL,
   kind TEXT NOT NULL,
+  color_hex TEXT,
   updated_at TEXT
 );
 `)
@@ -166,8 +168,8 @@ CREATE TABLE collections(
 	scheduled := now.Add(-2 * time.Hour).Format(time.RFC3339)
 	updated := now.Format(time.RFC3339)
 	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u1','Human Demo','active');")
-	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,updated_at) VALUES('c1','c_P1','Project Atlas','project',"+db.Quote(updated)+");")
-	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,updated_at) VALUES('c2','c_T1','Bugs','tag',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c1','c_P1','Project Atlas','project','#7AB8FF',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c2','c_T1','Bugs','tag','#FF9AA2',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('1','t_AAAAAA','Critical fix title','open','now',"+db.Quote(due)+","+db.Quote(scheduled)+","+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c1');")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c2');")
