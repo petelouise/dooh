@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -49,8 +47,6 @@ type app struct {
 	limit          int
 	loc            *time.Location
 	help           bool
-	inputMode      string
-	filterDraft    string
 }
 
 func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location) error {
@@ -75,11 +71,6 @@ func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog Theme
 		}
 	}
 
-	restore, err := setRawTTY()
-	if err == nil {
-		defer restore()
-	}
-
 	r := bufio.NewReader(in)
 	for {
 		rendered, err := a.render()
@@ -88,23 +79,21 @@ func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog Theme
 		}
 		_, _ = fmt.Fprint(out, "\x1b[2J\x1b[H")
 		_, _ = fmt.Fprint(out, rendered)
-		if a.inputMode == "filter" {
-			_, _ = fmt.Fprintf(out, "\n\x1b[2mfilter> %s (Enter apply, Esc cancel)\x1b[0m", a.filterDraft)
-		} else {
-			_, _ = fmt.Fprint(out, "\n\x1b[2mkeys: arrows/jk move  / filter  s status  p priority  t theme  h help  q quit\x1b[0m")
-		}
+		_, _ = fmt.Fprint(out, "\n\x1b[2mcmd (j/k move, /text filter, s status, p priority, t theme, h help, q quit): \x1b[0m")
 
-		key, err := readKey(r)
+		line, err := r.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				return nil
 			}
 			return err
 		}
-		if a.handleKey(key) {
+		cmd := strings.TrimSpace(line)
+		if cmd == "q" {
 			_, _ = fmt.Fprint(out, "\x1b[2J\x1b[H")
 			return nil
 		}
+		a.handle(cmd)
 	}
 }
 
@@ -123,62 +112,30 @@ func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int, lo
 	return a.render()
 }
 
-func (a *app) handleKey(key string) bool {
-	if a.inputMode == "filter" {
-		switch key {
-		case "enter":
-			a.filter = strings.TrimSpace(a.filterDraft)
-			a.inputMode = ""
-			a.selected = 0
-		case "esc":
-			a.inputMode = ""
-		case "backspace":
-			if len(a.filterDraft) > 0 {
-				a.filterDraft = a.filterDraft[:len(a.filterDraft)-1]
-				a.filter = strings.TrimSpace(a.filterDraft)
-				a.selected = 0
-			}
-		default:
-			if len(key) == 1 {
-				a.filterDraft += key
-				a.filter = strings.TrimSpace(a.filterDraft)
-				a.selected = 0
-			}
-		}
-		return false
-	}
-
-	switch key {
-	case "q":
-		return true
-	case "j", "down":
+func (a *app) handle(cmd string) {
+	switch {
+	case cmd == "":
+		return
+	case cmd == "j":
 		a.selected++
-	case "k", "up":
+	case cmd == "k":
 		a.selected--
-	case "s":
+	case cmd == "s":
 		a.statusFilter = cycle([]string{"all", "open", "completed", "archived"}, a.statusFilter)
 		a.selected = 0
-	case "p":
+	case cmd == "p":
 		a.priorityFilter = cycle([]string{"all", "now", "soon", "later"}, a.priorityFilter)
 		a.selected = 0
-	case "t", "right":
+	case cmd == "t":
 		if len(a.themes) > 0 {
 			a.themeIndex = (a.themeIndex + 1) % len(a.themes)
 		}
-	case "left":
-		if len(a.themes) > 0 {
-			a.themeIndex = (a.themeIndex + len(a.themes) - 1) % len(a.themes)
-		}
-	case "h":
+	case cmd == "h":
 		a.help = !a.help
-	case "/":
-		a.inputMode = "filter"
-		a.filterDraft = a.filter
-	case "c":
-		a.filter = ""
+	case strings.HasPrefix(cmd, "/"):
+		a.filter = strings.TrimSpace(strings.TrimPrefix(cmd, "/"))
 		a.selected = 0
 	}
-	return false
 }
 
 func (a *app) render() (string, error) {
@@ -200,11 +157,6 @@ func (a *app) render() (string, error) {
 	}
 
 	now := time.Now()
-	width := terminalColumns()
-	if width < 80 {
-		width = 80
-	}
-
 	var b strings.Builder
 	fg := func(hex, text string) string {
 		r, g, bl := hexToRGB(hex)
@@ -219,34 +171,20 @@ func (a *app) render() (string, error) {
 		total = 1
 	}
 
-	header := fmt.Sprintf("theme=%s  filter=/%s  status=%s  priority=%s", theme.Name, a.filter, a.statusFilter, a.priorityFilter)
 	b.WriteString(fg(theme.Colors["accent"], "dooh interactive") + "  ")
-	b.WriteString(fg(theme.Colors["muted"], truncateText(header, width-20)+"\n"))
-	b.WriteString(fg(theme.Colors["muted"], strings.Repeat("-", width)+"\n"))
+	b.WriteString(fg(theme.Colors["muted"], "theme="+theme.Name+"  "))
+	b.WriteString(fg(theme.Colors["muted"], "filter=/"+a.filter+"  status="+a.statusFilter+"  priority="+a.priorityFilter+"\n"))
+	b.WriteString(fg(theme.Colors["muted"], strings.Repeat("-", 118)+"\n"))
 	b.WriteString(fmt.Sprintf("open %s  completed %s  archived %s\n",
 		bar(open, total, theme.Colors["accent"]),
 		bar(completed, total, theme.Colors["success"]),
 		bar(archived, total, theme.Colors["warning"]),
 	))
 
-	split := width >= 116
-	leftWidth := width - 2
-	if split {
-		leftWidth = (width * 2 / 3) - 1
-		if leftWidth < 56 {
-			leftWidth = 56
-		}
-	}
-	metaWidth := 10 + 8 + 19 + 3
-	titleWidth := leftWidth - 3 - metaWidth
-	if titleWidth < 16 {
-		titleWidth = 16
-	}
-
-	left := make([]string, 0, a.limit+5)
+	left := make([]string, 0, a.limit+4)
 	left = append(left, fg(theme.Colors["text"], fmt.Sprintf("Tasks (%d)", len(tasks))))
-	left = append(left, fg(theme.Colors["muted"], fmt.Sprintf("%-*s %-10s %-8s %-19s", titleWidth, "Title", "Status", "Priority", "Updated")))
-	left = append(left, fg(theme.Colors["muted"], strings.Repeat("-", leftWidth-2)))
+	left = append(left, fg(theme.Colors["muted"], fmt.Sprintf("%-38s %-10s %-8s %-19s", "Title", "Status", "Priority", "Updated")))
+	left = append(left, fg(theme.Colors["muted"], strings.Repeat("-", 80)))
 
 	start := 0
 	if a.selected >= a.limit {
@@ -269,33 +207,26 @@ func (a *app) render() (string, error) {
 		if t.Status == "archived" {
 			stColor = theme.Colors["warning"]
 		}
-		line := fmt.Sprintf("%-*s %-10s %-8s %-19s", titleWidth, truncateText(t.Title, titleWidth), t.Status, t.Priority, NaturalDate(t.UpdatedAt, a.loc, now))
+		line := fmt.Sprintf("%-38s %-10s %-8s %-19s", truncateText(t.Title, 38), t.Status, t.Priority, NaturalDate(t.UpdatedAt, a.loc, now))
 		left = append(left, prefix+fg(stColor, line))
 	}
 	for len(left) < a.limit+6 {
 		left = append(left, "")
 	}
 
-	right := make([]string, 0, a.limit+6)
-	detailWidth := 34
-	if split {
-		detailWidth = width - leftWidth - 4
-	}
-	if detailWidth < 24 {
-		detailWidth = 24
-	}
+	right := make([]string, 0, a.limit+4)
 	right = append(right, fg(theme.Colors["text"], "Detail"))
-	right = append(right, fg(theme.Colors["muted"], strings.Repeat("-", detailWidth)))
+	right = append(right, fg(theme.Colors["muted"], strings.Repeat("-", 36)))
 	if len(tasks) > 0 {
 		t := tasks[a.selected]
-		right = append(right, fg(theme.Colors["accent"], truncateText(t.Title, detailWidth)))
+		right = append(right, fg(theme.Colors["accent"], truncateText(t.Title, 36)))
 		right = append(right, "id: "+t.ID)
 		right = append(right, "status: "+t.Status)
 		right = append(right, "priority: "+t.Priority)
 		right = append(right, "due: "+NaturalDate(t.DueAt, a.loc, now))
 		right = append(right, "scheduled: "+NaturalDate(t.Scheduled, a.loc, now))
 		right = append(right, "updated: "+NaturalDate(t.UpdatedAt, a.loc, now))
-		right = append(right, "collections: "+truncateText(t.Collection, detailWidth))
+		right = append(right, "collections: "+truncateText(t.Collection, 36))
 	} else {
 		right = append(right, fg(theme.Colors["muted"], "No tasks match current filters."))
 	}
@@ -311,21 +242,13 @@ func (a *app) render() (string, error) {
 	if a.help {
 		right = append(right, "")
 		right = append(right, fg(theme.Colors["muted"], "help"))
-		right = append(right, "arrows/jk: select")
-		right = append(right, "/: edit filter")
+		right = append(right, "j/k: select")
+		right = append(right, "/text: filter")
 		right = append(right, "s: status  p: priority")
-		right = append(right, "left/right/t: theme")
-		right = append(right, "c: clear filter  q: quit")
+		right = append(right, "t: theme  q: quit")
 	}
 
-	if split {
-		b.WriteString(mergeColumns(left, right, leftWidth))
-	} else {
-		b.WriteString(strings.Join(left, "\n"))
-		b.WriteString("\n\n")
-		b.WriteString(strings.Join(right, "\n"))
-		b.WriteString("\n")
-	}
+	b.WriteString(mergeColumns(left, right, 82))
 	return b.String(), nil
 }
 
@@ -501,86 +424,4 @@ func stripANSI(s string) string {
 		b.WriteByte(ch)
 	}
 	return b.String()
-}
-
-func readKey(r *bufio.Reader) (string, error) {
-	b, err := r.ReadByte()
-	if err != nil {
-		return "", err
-	}
-	if b == 0x1b {
-		b2, err := r.ReadByte()
-		if err != nil {
-			return "esc", nil
-		}
-		if b2 != '[' {
-			return "esc", nil
-		}
-		b3, err := r.ReadByte()
-		if err != nil {
-			return "esc", nil
-		}
-		switch b3 {
-		case 'A':
-			return "up", nil
-		case 'B':
-			return "down", nil
-		case 'C':
-			return "right", nil
-		case 'D':
-			return "left", nil
-		default:
-			return "", nil
-		}
-	}
-	switch b {
-	case '\r', '\n':
-		return "enter", nil
-	case 127, 8:
-		return "backspace", nil
-	case '/':
-		return "/", nil
-	}
-	if b >= 32 && b <= 126 {
-		return string(b), nil
-	}
-	return "", nil
-}
-
-func setRawTTY() (func(), error) {
-	if fi, err := os.Stdin.Stat(); err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
-		return func() {}, nil
-	}
-	stateOut, err := exec.Command("sh", "-c", "stty -g </dev/tty").Output()
-	if err != nil {
-		return nil, err
-	}
-	state := strings.TrimSpace(string(stateOut))
-	if err := exec.Command("sh", "-c", "stty raw -echo </dev/tty").Run(); err != nil {
-		return nil, err
-	}
-	return func() {
-		_ = exec.Command("sh", "-c", "stty "+state+" </dev/tty").Run()
-	}, nil
-}
-
-func terminalColumns() int {
-	if v := strings.TrimSpace(os.Getenv("COLUMNS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	out, err := exec.Command("sh", "-c", "stty size </dev/tty").Output()
-	if err != nil {
-		return 120
-	}
-	parts := strings.Fields(strings.TrimSpace(string(out)))
-	if len(parts) != 2 {
-		return 120
-	}
-	n, err := strconv.Atoi(parts[1])
-	if err != nil || n <= 0 {
-		return 120
-	}
-	return n
 }
