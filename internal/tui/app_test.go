@@ -180,6 +180,22 @@ func TestFilterFocusTabMoves(t *testing.T) {
 	}
 }
 
+func TestEnterOnProjectViewDrillsToScopedTasks(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.view = "projects"
+	m.handleKey("enter")
+	if m.view != "tasks" {
+		t.Fatalf("expected enter to drill into tasks view, got %s", m.view)
+	}
+	if m.filters.ScopeKind != "project" {
+		t.Fatalf("expected project scope after enter, got %s", m.filters.ScopeKind)
+	}
+	if m.filters.ScopeID == "" {
+		t.Fatalf("expected non-empty project scope id")
+	}
+}
+
 func newTUIDB(t *testing.T) db.SQLite {
 	t.Helper()
 	if _, err := exec.LookPath("sqlite3"); err != nil {
@@ -217,6 +233,7 @@ CREATE TABLE collections(
   name TEXT NOT NULL,
   kind TEXT NOT NULL,
   color_hex TEXT,
+  deleted_at TEXT,
   updated_at TEXT
 );
 `)

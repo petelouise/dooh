@@ -236,11 +236,7 @@ func (m *model) handleKey(key string) bool {
 	case "left":
 		m.expandedID = ""
 	case "enter":
-		if m.filterFocus == filterFieldStatus || m.filterFocus == filterFieldPriority || m.filterFocus == filterFieldTodayMode || m.filterFocus == filterFieldText || m.filterFocus == filterFieldTags || m.filterFocus == filterFieldAssignee {
-			m.beginFilterEdit(m.filterFocus)
-		} else {
-			m.enterSelected()
-		}
+		m.enterSelected()
 	case "/":
 		m.filterFocus = filterFieldText
 		m.beginFilterEdit(filterFieldText)
