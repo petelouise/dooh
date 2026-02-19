@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ type principal struct {
 	Scopes     map[string]bool
 }
 
-var errNoAuthContext = errors.New("No authenticated user context. Set DOOH_MODE and provide a valid key (human via --api-key, agent via env key).")
+var errNoAuthContext = errors.New("No authenticated user context. Set DOOH_MODE and provide a valid key (human via --api-key or `dooh login human`, agent via env key).")
 
 type globalOpts struct {
 	Profile    string
@@ -70,8 +71,14 @@ func Run(args []string, stdout io.Writer) error {
 		return runConfig(rt, rest[1:], stdout)
 	case "db":
 		return runDB(rt, rest[1:], stdout)
+	case "setup":
+		return runSetup(rt, rest[1:], stdout)
 	case "demo":
 		return runDemo(rt, rest[1:], stdout)
+	case "login":
+		return runLogin(rt, rest[1:], stdout)
+	case "env":
+		return runEnv(rt, rest[1:], stdout)
 	case "user":
 		return runUser(rt, rest[1:], stdout)
 	case "key":
@@ -97,7 +104,7 @@ func Run(args []string, stdout io.Writer) error {
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "dooh (pronounced duo)")
 	_, _ = fmt.Fprintln(w, "global flags: --profile <name> --config <path>")
-	_, _ = fmt.Fprintln(w, "commands: config, db, demo, user, key, task, collection, export, tui, whoami, version")
+	_, _ = fmt.Fprintln(w, "commands: config, db, setup, demo, login, env, user, key, task, collection, export, tui, whoami, version")
 }
 
 func parseGlobal(args []string) (globalOpts, []string, error) {
@@ -228,18 +235,146 @@ func runDB(rt runtime, args []string, out io.Writer) error {
 	dbResolved := resolveDB(rt, *dbPath)
 
 	sqlite := db.New(dbResolved)
-	migrationPath := filepath.Join("migrations", "0001_init.sql")
-	migration, err := os.ReadFile(migrationPath)
-	if err != nil {
-		return fmt.Errorf("read migration %s: %w", migrationPath, err)
-	}
-	if err := sqlite.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		return err
-	}
-	if err := sqlite.Exec(string(migration)); err != nil {
+	if err := initDatabase(sqlite); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "initialized database: %s\n", dbResolved)
+	return nil
+}
+
+func runSetup(rt runtime, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("setup subcommand required")
+	}
+	switch args[0] {
+	case "demo":
+		fs := flag.NewFlagSet("setup demo", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dbPath := fs.String("db", "", "sqlite database path")
+		humanProfile := fs.String("human-profile", "human", "profile to store demo human key")
+		agentProfile := fs.String("agent-profile", "agent", "profile to store demo agent key")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		dbResolved := resolveDB(rt, *dbPath)
+		sqlite := db.New(dbResolved)
+		if err := initDatabase(sqlite); err != nil {
+			return err
+		}
+		res, err := demo.Seed(sqlite)
+		if err != nil {
+			return err
+		}
+		humanID, err := userIDByName(sqlite, "Human Demo")
+		if err != nil {
+			return err
+		}
+		agentID, err := userIDByName(sqlite, "Agent Demo")
+		if err != nil {
+			return err
+		}
+		humanScopes := "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback"
+		agentScopes := "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run"
+		humanKey, humanPrefix, err := createAPIKey(sqlite, humanID, "human_cli", humanScopes)
+		if err != nil {
+			return err
+		}
+		agentKey, agentPrefix, err := createAPIKey(sqlite, agentID, "agent_cli", agentScopes)
+		if err != nil {
+			return err
+		}
+		humanPath, err := writeStoredKey(*humanProfile, "human", humanKey)
+		if err != nil {
+			return err
+		}
+		agentPath, err := writeStoredKey(*agentProfile, "agent", agentKey)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "setup complete: db=%s users=%d collections=%d tasks=%d\n", dbResolved, res.Users, res.Collections, res.Tasks)
+		_, _ = fmt.Fprintf(out, "stored human key %s in %s (profile=%s)\n", humanPrefix, humanPath, *humanProfile)
+		_, _ = fmt.Fprintf(out, "stored agent key %s in %s (profile=%s)\n", agentPrefix, agentPath, *agentProfile)
+		_, _ = fmt.Fprintf(out, "next: eval \"$(dooh --profile %s env --mode human)\" && dooh --profile %s tui\n", *humanProfile, *humanProfile)
+		return nil
+	default:
+		return fmt.Errorf("unknown setup command %q", args[0])
+	}
+}
+
+func runLogin(rt runtime, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: login <human|agent> --api-key <key> [--db <path>]")
+	}
+	actor := strings.TrimSpace(args[0])
+	if actor != "human" && actor != "agent" {
+		return errors.New("usage: login <human|agent> --api-key <key> [--db <path>]")
+	}
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dbPath := fs.String("db", "", "sqlite database path")
+	apiKey := fs.String("api-key", "", "api key to store for profile")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*apiKey) == "" {
+		return errors.New("--api-key is required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := principalFromKey(sqlite, strings.TrimSpace(*apiKey), actor)
+	if err != nil {
+		return errNoAuthContext
+	}
+	path, err := writeStoredKey(rt.opts.Profile, actor, strings.TrimSpace(*apiKey))
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "stored %s key for profile %s in %s\n", actor, rt.opts.Profile, path)
+	_, _ = fmt.Fprintf(out, "user=%s key=%s\n", p.UserID, p.KeyPrefix)
+	return nil
+}
+
+func runEnv(rt runtime, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("env", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	mode := fs.String("mode", "", "actor mode (human|agent)")
+	dbPath := fs.String("db", "", "sqlite database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	selectedMode := strings.TrimSpace(*mode)
+	if selectedMode == "" {
+		selectedMode = strings.TrimSpace(os.Getenv("DOOH_MODE"))
+	}
+	if selectedMode == "" {
+		if rt.opts.Profile == "agent" {
+			selectedMode = "agent"
+		} else {
+			selectedMode = "human"
+		}
+	}
+	if selectedMode != "human" && selectedMode != "agent" {
+		return errors.New("--mode must be human or agent")
+	}
+	_, _ = fmt.Fprintf(out, "export DOOH_PROFILE=%s\n", shellQuote(rt.opts.Profile))
+	_, _ = fmt.Fprintf(out, "export DOOH_DB=%s\n", shellQuote(resolveDB(rt, *dbPath)))
+	_, _ = fmt.Fprintf(out, "export DOOH_MODE=%s\n", shellQuote(selectedMode))
+	apiEnv := rt.profile.APIKeyEnv
+	if strings.TrimSpace(apiEnv) == "" {
+		apiEnv = "DOOH_API_KEY"
+	}
+	if selectedMode == "agent" {
+		k, _, err := readStoredKey(rt.opts.Profile, "agent")
+		if err != nil {
+			return err
+		}
+		if k == "" {
+			_, _ = fmt.Fprintf(out, "# no stored agent key for profile %s (run: dooh --profile %s login agent --api-key <key>)\n", rt.opts.Profile, rt.opts.Profile)
+		} else {
+			_, _ = fmt.Fprintf(out, "export %s=%s\n", apiEnv, shellQuote(k))
+		}
+	} else {
+		_, _ = fmt.Fprintf(out, "unset %s\n", apiEnv)
+	}
 	return nil
 }
 
@@ -1069,6 +1204,140 @@ func mustReadAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, neededScopes
 	return mustAuth(rt, sqlite, keyFromFlag, false, neededScopes...)
 }
 
+func initDatabase(sqlite db.SQLite) error {
+	_, migration, err := readInitMigration()
+	if err != nil {
+		return err
+	}
+	if err := sqlite.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		return err
+	}
+	return sqlite.Exec(string(migration))
+}
+
+func readInitMigration() (string, []byte, error) {
+	candidates := []string{
+		filepath.Join("migrations", "0001_init.sql"),
+		filepath.Join("..", "migrations", "0001_init.sql"),
+		filepath.Join("..", "..", "migrations", "0001_init.sql"),
+	}
+	if _, file, _, ok := goruntime.Caller(0); ok {
+		base := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+		candidates = append([]string{filepath.Join(base, "migrations", "0001_init.sql")}, candidates...)
+	}
+	var lastErr error
+	for _, path := range candidates {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			return path, b, nil
+		}
+		lastErr = err
+	}
+	return "", nil, fmt.Errorf("read migration migrations/0001_init.sql: %w", lastErr)
+}
+
+func userIDByName(sqlite db.SQLite, name string) (string, error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT id FROM users WHERE name=%s AND status='active' LIMIT 1;", db.Quote(name)))
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return "", fmt.Errorf("missing active user %q", name)
+	}
+	return rows[0][0], nil
+}
+
+func createAPIKey(sqlite db.SQLite, userID string, clientType string, scopes string) (plain string, prefix string, err error) {
+	plain, prefix, hash, err := auth.NewAPIKey()
+	if err != nil {
+		return "", "", err
+	}
+	id, err := idgen.ULIDLike()
+	if err != nil {
+		return "", "", err
+	}
+	sql := fmt.Sprintf("INSERT INTO api_keys(id,user_id,key_prefix,key_hash,scopes,client_type) VALUES(%s,%s,%s,%s,%s,%s);",
+		db.Quote(id), db.Quote(userID), db.Quote(prefix), db.Quote(hash), db.Quote(scopes), db.Quote(clientType))
+	if err := sqlite.Exec(sql); err != nil {
+		return "", "", err
+	}
+	return plain, prefix, nil
+}
+
+func authStoreDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "dooh", "auth"), nil
+}
+
+func keyFilePath(profile string, actor string) (string, error) {
+	if actor != "human" && actor != "agent" {
+		return "", fmt.Errorf("invalid actor %q", actor)
+	}
+	p := strings.TrimSpace(profile)
+	if p == "" {
+		p = "default"
+	}
+	dir, err := authStoreDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s.%s.key", p, actor)), nil
+}
+
+func writeStoredKey(profile string, actor string, key string) (string, error) {
+	path, err := keyFilePath(profile, actor)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(key)+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func readStoredKey(profile string, actor string) (key string, path string, err error) {
+	path, err = keyFilePath(profile, actor)
+	if err != nil {
+		return "", "", err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", path, nil
+		}
+		return "", path, err
+	}
+	return strings.TrimSpace(string(b)), path, nil
+}
+
+func shellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
+func principalFromKey(sqlite db.SQLite, key string, actor string) (principal, error) {
+	var p principal
+	hash := auth.HashAPIKey(key)
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type,u.name FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
+	if err != nil {
+		return p, err
+	}
+	if len(rows) == 0 || len(rows[0]) < 6 {
+		return p, errNoAuthContext
+	}
+	p = principal{UserID: rows[0][1], UserName: rows[0][5], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
+	expectedClient := actor + "_cli"
+	if p.ClientType != expectedClient && p.ClientType != "system" {
+		return principal{}, fmt.Errorf("key client_type %s cannot be used as %s", p.ClientType, actor)
+	}
+	return p, nil
+}
+
 func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
 	var p principal
 	mode := strings.TrimSpace(os.Getenv("DOOH_MODE"))
@@ -1091,6 +1360,13 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 		}
 	} else {
 		if key == "" {
+			stored, _, err := readStoredKey(rt.opts.Profile, "human")
+			if err != nil {
+				return p, err
+			}
+			key = stored
+		}
+		if key == "" {
 			return p, errNoAuthContext
 		}
 	}
@@ -1099,19 +1375,9 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 			return p, errors.New("human actor requires interactive terminal")
 		}
 	}
-	hash := auth.HashAPIKey(key)
-	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type,u.name FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
+	p, err := principalFromKey(sqlite, key, actor)
 	if err != nil {
-		return p, err
-	}
-	if len(rows) == 0 || len(rows[0]) < 6 {
-		return p, errNoAuthContext
-	}
-	p = principal{UserID: rows[0][1], UserName: rows[0][5], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
-
-	expectedClient := actor + "_cli"
-	if p.ClientType != expectedClient && p.ClientType != "system" {
-		return principal{}, fmt.Errorf("key client_type %s cannot be used as %s", p.ClientType, actor)
+		return principal{}, err
 	}
 	for _, need := range neededScopes {
 		if !p.Scopes[need] {

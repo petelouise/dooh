@@ -19,7 +19,18 @@ GOCACHE=$(pwd)/.cache/go-build go build ./cmd/dooh
 export GOCACHE="$(pwd)/.cache/go-build"
 ```
 
-## Quick start
+## Streamlined quick start
+```bash
+# one command bootstrap: db + seed + human/agent demo keys in profile auth store
+go run ./cmd/dooh setup demo --db ./dooh.db
+
+# load human context for shell and run without repeated --db/--api-key
+eval "$(go run ./cmd/dooh --profile human env --mode human)"
+go run ./cmd/dooh --profile human whoami
+go run ./cmd/dooh --profile human tui --theme midnight-arcade
+```
+
+## Manual quick start
 ```bash
 # 1) initialize database
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh db init --db ./dooh.db
@@ -31,7 +42,7 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh user create --db ./dooh.db --na
 HUMAN_ID=$(sqlite3 -noheader ./dooh.db "select id from users limit 1;")
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh key create --db ./dooh.db --user "$HUMAN_ID" --client-type human_cli --scopes "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback" --bootstrap
 
-# 4) use printed api_key for writes
+# 4) use printed api_key for writes (or store once via login command)
 export DOOH_MODE=human
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task add --db ./dooh.db --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
@@ -57,8 +68,20 @@ go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
 
 For all data commands (read and write):
 - set `DOOH_MODE=human` or `DOOH_MODE=agent`.
-- `human` mode requires `--api-key`.
+- `human` mode uses `--api-key` or a stored key from `dooh login human`.
 - `agent` mode requires key from env (`DOOH_API_KEY`), and rejects `--api-key`.
+
+Store keys once per profile:
+```bash
+go run ./cmd/dooh --profile human login human --db ./dooh.db --api-key "<HUMAN_KEY>"
+go run ./cmd/dooh --profile agent login agent --db ./dooh.db --api-key "<AGENT_KEY>"
+```
+
+Emit shell exports for profile context:
+```bash
+eval "$(go run ./cmd/dooh --profile human env --mode human)"
+eval "$(go run ./cmd/dooh --profile agent env --mode agent)"
+```
 
 Inspect current execution identity:
 ```bash
@@ -168,6 +191,7 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
 ## Auth safety behavior
 - all runtime data commands require authenticated user context (no anonymous mode).
 - `DOOH_MODE` is required and must be `human` or `agent`.
-- `human` mode requires explicit `--api-key` (no env fallback).
+- `human` mode accepts explicit `--api-key` and otherwise reads profile-scoped stored login key.
 - `agent` mode requires env key (`DOOH_API_KEY` or profile `api_key_env`) and rejects `--api-key`.
 - Key `client_type` must match actor (`human_cli` or `agent_cli`) unless key type is `system`.
+- profile-scoped keys are written to `~/.config/dooh/auth/<profile>.<actor>.key` with `0600` permissions.
