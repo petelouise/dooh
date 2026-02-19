@@ -79,6 +79,10 @@ func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog Theme
 	if err == nil {
 		defer restore()
 	}
+	_, _ = fmt.Fprint(out, "\x1b[?1049h")
+	defer func() {
+		_, _ = fmt.Fprint(out, "\x1b[?1049l")
+	}()
 
 	r := bufio.NewReader(in)
 	for {
@@ -486,12 +490,23 @@ func padANSI(s string, width int) string {
 func stripANSI(s string) string {
 	var b strings.Builder
 	esc := false
+	csi := false
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if esc {
-			if ch >= 'A' && ch <= 'z' {
+		if csi {
+			// End of CSI sequence bytes range from 0x40 to 0x7E.
+			if ch >= 0x40 && ch <= 0x7E {
+				csi = false
 				esc = false
 			}
+			continue
+		}
+		if esc {
+			if ch == '[' {
+				csi = true
+				continue
+			}
+			esc = false
 			continue
 		}
 		if ch == 0x1b {
