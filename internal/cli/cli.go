@@ -22,12 +22,15 @@ import (
 
 type principal struct {
 	UserID     string
+	UserName   string
 	KeyID      string
 	KeyPrefix  string
 	Actor      string
 	ClientType string
 	Scopes     map[string]bool
 }
+
+var errNoAuthContext = errors.New("No authenticated user context. Set DOOH_MODE and provide a valid key (human via --api-key, agent via env key).")
 
 type globalOpts struct {
 	Profile    string
@@ -310,10 +313,15 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 		fs := flag.NewFlagSet("user list", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		dbPath := fs.String("db", "", "sqlite database path")
+		apiKey := fs.String("api-key", "", "api key (required in human mode)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		rows, err := db.New(resolveDB(rt, *dbPath)).QueryTSV("SELECT id,name,status,created_at FROM users ORDER BY created_at;")
+		sqlite := db.New(resolveDB(rt, *dbPath))
+		if _, err := mustReadAuth(rt, sqlite, *apiKey, "users:admin"); err != nil {
+			return err
+		}
+		rows, err := sqlite.QueryTSV("SELECT id,name,status,created_at FROM users ORDER BY created_at;")
 		if err != nil {
 			return err
 		}
@@ -452,10 +460,15 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		dbPath := fs.String("db", "", "sqlite database path")
+		apiKey := fs.String("api-key", "", "api key (required in human mode)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		rows, err := db.New(resolveDB(rt, *dbPath)).QueryTSV("SELECT title,status,priority,updated_at,short_id FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
+		sqlite := db.New(resolveDB(rt, *dbPath))
+		if _, err := mustReadAuth(rt, sqlite, *apiKey, "tasks:read"); err != nil {
+			return err
+		}
+		rows, err := sqlite.QueryTSV("SELECT title,status,priority,updated_at,short_id FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
 		if err != nil {
 			return err
 		}
@@ -827,10 +840,15 @@ func runCollection(rt runtime, args []string, out io.Writer) error {
 		fs := flag.NewFlagSet("collection list", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		dbPath := fs.String("db", "", "sqlite database path")
+		apiKey := fs.String("api-key", "", "api key (required in human mode)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		rows, err := db.New(resolveDB(rt, *dbPath)).QueryTSV("SELECT short_id,name,kind,color_hex,updated_at FROM collections WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
+		sqlite := db.New(resolveDB(rt, *dbPath))
+		if _, err := mustReadAuth(rt, sqlite, *apiKey, "collections:read"); err != nil {
+			return err
+		}
+		rows, err := sqlite.QueryTSV("SELECT short_id,name,kind,color_hex,updated_at FROM collections WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
 		if err != nil {
 			return err
 		}
@@ -930,6 +948,7 @@ func runExport(rt runtime, args []string, out io.Writer) error {
 	fs.SetOutput(io.Discard)
 	outDir := fs.String("out", "", "output directory")
 	dbPath := fs.String("db", "", "sqlite database path")
+	apiKey := fs.String("api-key", "", "api key (required in human mode)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -937,7 +956,11 @@ func runExport(rt runtime, args []string, out io.Writer) error {
 	if resolvedOut == "" {
 		resolvedOut = rt.profile.ExportDir
 	}
-	if err := exporter.ExportSite(db.New(resolveDB(rt, *dbPath)), resolvedOut); err != nil {
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	if _, err := mustReadAuth(rt, sqlite, *apiKey, "export:run"); err != nil {
+		return err
+	}
+	if err := exporter.ExportSite(sqlite, resolvedOut); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "exported site data to %s\n", resolvedOut)
@@ -954,6 +977,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	static := fs.Bool("static", false, "render once and exit")
 	plain := fs.Bool("plain", false, "disable ANSI and render plain table")
 	dbPath := fs.String("db", "", "sqlite database path")
+	apiKey := fs.String("api-key", "", "api key (required in human mode)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -961,6 +985,12 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustReadAuth(rt, sqlite, *apiKey, "tasks:read", "collections:read")
+	if err != nil {
+		return err
+	}
+	identity := tui.Identity{Actor: p.Actor, UserID: p.UserID, UserName: p.UserName}
 	if *listThemes {
 		for _, item := range catalog.Themes {
 			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\n", item.ID, item.Name, item.Description)
@@ -987,9 +1017,8 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	if err != nil {
 		loc = time.Local
 	}
-	sqlite := db.New(resolveDB(rt, *dbPath))
 	if *static {
-		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, *plain)
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, identity, *plain)
 		if err != nil {
 			return err
 		}
@@ -997,7 +1026,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 		return nil
 	}
 	if *plain {
-		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, true)
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, identity, true)
 		if err != nil {
 			return err
 		}
@@ -1005,14 +1034,14 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 		return nil
 	}
 	if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
-		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, true)
+		panel, err := tui.RenderDashboard(sqlite, chosen, *filter, *limit, loc, identity, true)
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprint(out, panel)
 		return nil
 	}
-	return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc, false)
+	return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc, identity, false)
 }
 
 func resolveDB(rt runtime, flagVal string) string {
@@ -1036,17 +1065,21 @@ func printWriteContext(out io.Writer, rt runtime, dbPath string, p principal) {
 	)
 }
 
+func mustReadAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, neededScopes ...string) (principal, error) {
+	return mustAuth(rt, sqlite, keyFromFlag, false, neededScopes...)
+}
+
 func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY bool, neededScopes ...string) (principal, error) {
 	var p principal
 	mode := strings.TrimSpace(os.Getenv("DOOH_MODE"))
 	if mode != "human" && mode != "agent" {
-		return p, errors.New("DOOH_MODE must be set to human or agent for mutating commands")
+		return p, errNoAuthContext
 	}
 	actor := mode
 	key := strings.TrimSpace(keyFromFlag)
 	if actor == "agent" {
 		if key != "" {
-			return p, errors.New("agent mode requires API key from environment, not --api-key")
+			return p, errNoAuthContext
 		}
 		envKey := rt.profile.APIKeyEnv
 		if strings.TrimSpace(envKey) == "" {
@@ -1054,11 +1087,11 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 		}
 		key = strings.TrimSpace(os.Getenv(envKey))
 		if key == "" {
-			return p, fmt.Errorf("missing api key in %s for agent mode", envKey)
+			return p, errNoAuthContext
 		}
 	} else {
 		if key == "" {
-			return p, errors.New("human mode requires --api-key")
+			return p, errNoAuthContext
 		}
 	}
 	if requireHumanTTY && actor == "human" {
@@ -1067,14 +1100,14 @@ func mustAuth(rt runtime, sqlite db.SQLite, keyFromFlag string, requireHumanTTY 
 		}
 	}
 	hash := auth.HashAPIKey(key)
-	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
+	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT k.id,k.user_id,k.key_prefix,k.scopes,k.client_type,u.name FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.key_hash=%s AND k.revoked_at IS NULL AND u.status='active' LIMIT 1;", db.Quote(hash)))
 	if err != nil {
 		return p, err
 	}
-	if len(rows) == 0 || len(rows[0]) < 5 {
-		return p, errors.New("invalid api key")
+	if len(rows) == 0 || len(rows[0]) < 6 {
+		return p, errNoAuthContext
 	}
-	p = principal{UserID: rows[0][1], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
+	p = principal{UserID: rows[0][1], UserName: rows[0][5], KeyID: rows[0][0], KeyPrefix: rows[0][2], Actor: actor, ClientType: rows[0][4], Scopes: parseScopes(rows[0][3])}
 
 	expectedClient := actor + "_cli"
 	if p.ClientType != expectedClient && p.ClientType != "system" {
@@ -1403,6 +1436,9 @@ func kindCell(v string, width int) string {
 }
 
 func writeEvent(sqlite db.SQLite, p principal, eventType string, aggregateType string, aggregateID string, payload any) error {
+	if strings.TrimSpace(p.UserID) == "" {
+		return errors.New("missing actor user for event")
+	}
 	eventID, err := idgen.ULIDLike()
 	if err != nil {
 		return err

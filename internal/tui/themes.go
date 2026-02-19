@@ -1,9 +1,11 @@
 package tui
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // ThemeCatalog is read from presets.json to keep design choices declarative.
@@ -19,11 +21,23 @@ type Theme struct {
 	Colors      map[string]string `json:"colors"`
 }
 
+//go:embed themes/presets.json
+var embeddedThemes []byte
+
 func LoadThemes(path string) (ThemeCatalog, error) {
 	var catalog ThemeCatalog
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return catalog, fmt.Errorf("read themes file: %w", err)
+	var (
+		b   []byte
+		err error
+	)
+	if strings.TrimSpace(path) == "" {
+		b = embeddedThemes
+	} else {
+		b, err = os.ReadFile(path)
+		if err != nil {
+			// Fallback keeps runtime/test behavior stable even if cwd is package-local.
+			b = embeddedThemes
+		}
 	}
 	if err := json.Unmarshal(b, &catalog); err != nil {
 		return catalog, fmt.Errorf("parse themes file: %w", err)

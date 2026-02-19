@@ -263,7 +263,7 @@ func testModel(sqlite db.SQLite) model {
 			{ID: "sunset-pop", Name: "Sunset Pop"},
 		},
 	}
-	return newModel(sqlite, catalog, "sunset-pop", "", 12, time.UTC, true)
+	return newModel(sqlite, catalog, "sunset-pop", "", 12, time.UTC, Identity{Actor: "human", UserID: "u1", UserName: "Human Demo"}, true)
 }
 
 func visibleLen(s string) int {

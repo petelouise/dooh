@@ -37,9 +37,9 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task add --db ./dooh.db --api-k
 GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
 
 # 5) list + export
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task list --db ./dooh.db
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection list --db ./dooh.db
-GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --out ./site-data
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh task list --db ./dooh.db --api-key "<PASTE_KEY>"
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh collection list --db ./dooh.db --api-key "<PASTE_KEY>"
+GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh export site --db ./dooh.db --out ./site-data --api-key "<PASTE_KEY>"
 ```
 
 Relationship commands:
@@ -55,9 +55,9 @@ go run ./cmd/dooh collection link --parent <collection> --child <collection>
 go run ./cmd/dooh collection unlink --parent <collection> --child <collection>
 ```
 
-For all mutating commands:
+For all data commands (read and write):
 - set `DOOH_MODE=human` or `DOOH_MODE=agent`.
-- `human` mode requires `--api-key` on each write command.
+- `human` mode requires `--api-key`.
 - `agent` mode requires key from env (`DOOH_API_KEY`), and rejects `--api-key`.
 
 Inspect current execution identity:
@@ -71,9 +71,10 @@ DOOH_MODE=agent DOOH_API_KEY="<AGENT_KEY>" go run ./cmd/dooh whoami
 export GOCACHE="$(pwd)/.cache/go-build"
 go run ./cmd/dooh db init --db ./dooh.db
 go run ./cmd/dooh demo seed --db ./dooh.db
-go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12
-go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --static
-go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --plain
+export DOOH_MODE=human
+go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12
+go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --static
+go run ./cmd/dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --plain
 ```
 
 TUI controls:
@@ -105,7 +106,7 @@ View headers are context-aware:
 TUI is currently read-focused:
 - no command bar workflow is required
 - filters are always visible at the top: text/status/priority/tag/assignee/scope
-- `today` view defaults to tasks assigned to the current user context (`DOOH_TUI_USER` or `DOOH_MODE` hint)
+- `today` view defaults to tasks assigned to the authenticated user
 - toggle `mine/all` in Today view with `m`
 
 Task rows use status icons instead of a status text column:
@@ -165,7 +166,8 @@ GOCACHE=$(pwd)/.cache/go-build go run ./cmd/dooh --profile human config show
 ```
 
 ## Auth safety behavior
-- `DOOH_MODE` is required for mutating commands and must be `human` or `agent`.
-- `human` mode requires explicit `--api-key` (no env fallback) to reduce accidental AI impersonation.
+- all runtime data commands require authenticated user context (no anonymous mode).
+- `DOOH_MODE` is required and must be `human` or `agent`.
+- `human` mode requires explicit `--api-key` (no env fallback).
 - `agent` mode requires env key (`DOOH_API_KEY` or profile `api_key_env`) and rejects `--api-key`.
 - Key `client_type` must match actor (`human_cli` or `agent_cli`) unless key type is `system`.

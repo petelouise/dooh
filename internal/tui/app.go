@@ -43,6 +43,12 @@ type progressRow struct {
 	Total     int
 }
 
+type Identity struct {
+	Actor    string
+	UserID   string
+	UserName string
+}
+
 type FilterState struct {
 	Text      string
 	Status    string
@@ -92,6 +98,7 @@ type model struct {
 	view            string
 	rng             *rand.Rand
 	currentUserHint string
+	identity        Identity
 
 	scopeColor string
 
@@ -106,8 +113,8 @@ type model struct {
 	expandedID     string
 }
 
-func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, plain bool) error {
-	m := newModel(sqlite, catalog, themeID, filter, limit, loc, plain)
+func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, identity Identity, plain bool) error {
+	m := newModel(sqlite, catalog, themeID, filter, limit, loc, identity, plain)
 
 	cols, _ := terminalSize()
 	if cols < 72 || !isTTY() {
@@ -160,14 +167,14 @@ func RunInteractive(in io.Reader, out io.Writer, sqlite db.SQLite, catalog Theme
 	}
 }
 
-func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int, loc *time.Location, plain bool) (string, error) {
+func RenderDashboard(sqlite db.SQLite, theme Theme, filter string, limit int, loc *time.Location, identity Identity, plain bool) (string, error) {
 	catalog := ThemeCatalog{Themes: []Theme{theme}, Default: theme.ID}
-	m := newModel(sqlite, catalog, theme.ID, filter, limit, loc, plain)
+	m := newModel(sqlite, catalog, theme.ID, filter, limit, loc, identity, plain)
 	cols, lines := terminalSize()
 	return m.render(cols, lines)
 }
 
-func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, plain bool) model {
+func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, identity Identity, plain bool) model {
 	if limit <= 0 {
 		limit = 14
 	}
@@ -182,16 +189,9 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		loc = time.Local
 	}
 	seed := time.Now().UnixNano()
-	userHint := strings.TrimSpace(os.Getenv("DOOH_TUI_USER"))
+	userHint := strings.TrimSpace(identity.UserName)
 	if userHint == "" {
-		switch strings.TrimSpace(strings.ToLower(os.Getenv("DOOH_MODE"))) {
-		case "human":
-			userHint = "human"
-		case "agent":
-			userHint = "agent"
-		default:
-			userHint = strings.TrimSpace(os.Getenv("USER"))
-		}
+		userHint = strings.TrimSpace(identity.UserID)
 	}
 	return model{
 		sqlite:     sqlite,
@@ -209,6 +209,7 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		view:            "tasks",
 		rng:             rand.New(rand.NewSource(seed)),
 		currentUserHint: strings.ToLower(userHint),
+		identity:        identity,
 	}
 }
 
@@ -582,7 +583,8 @@ func (m *model) render(cols int, lines int) (string, error) {
 	if m.filters.ScopeKind != "" {
 		scope = m.filters.ScopeKind + ":" + m.filters.ScopeName
 	}
-	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s", m.themes[m.themeIndex].Name, m.view)
+	identityText := fmt.Sprintf("%s | %s", fallbackDash(m.identity.Actor), fallbackDash(m.identity.UserName))
+	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s  identity=%s", m.themes[m.themeIndex].Name, m.view, identityText)
 	filterLine := m.renderFilterBar(scope, cols)
 	banner := bannerText(m.view, m.filters.ScopeKind, m.filters.ScopeName)
 	bannerLine := centerText("["+banner+"]", cols)
