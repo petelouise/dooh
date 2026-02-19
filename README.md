@@ -78,16 +78,19 @@ go run ./cmd/dooh tui --db ./dooh.db --theme midnight-arcade --limit 12 --plain
 
 TUI controls:
 - `up/down`: move selection (no Enter required)
+- `Enter`: expand task detail, or drill into selected project/goal/assignee
 - `right`: expand selected task inline
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
+- `:` command bar (examples: `view goals`, `tag bugs`, `assignee Human`, `scope clear`, `clear`)
 - `s`: cycle status filter
 - `p`: cycle priority filter
-- `t`: cycle theme accent
+- `t`: randomize theme
 - `1`: task list view
 - `2`: project progress view
 - `3`: goal progress view
 - `4`: today view (tasks scheduled today)
+- `5`: assignee progress view
 - `c`: clear all filters back to defaults (`status=open`, `priority=all`, empty text)
 - `q`: quit
 
