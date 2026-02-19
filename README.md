@@ -80,12 +80,21 @@ TUI controls:
 - `up/down`: move selection (no Enter required)
 - `right`: expand selected task inline
 - `left`: collapse inline detail
-- `/`: edit filter (`Enter` apply, `Esc` cancel)
+- `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
 - `s`: cycle status filter
 - `p`: cycle priority filter
 - `t`: cycle theme accent
-- `c`: clear filter
+- `1`: task list view
+- `2`: project progress view
+- `3`: goal progress view
+- `4`: today view (tasks scheduled today)
+- `c`: clear all filters back to defaults (`status=open`, `priority=all`, empty text)
 - `q`: quit
+
+Task rows use status icons instead of a status text column:
+- `○` open
+- `✓` completed
+- `✕` archived
 
 Timestamps in TUI use natural format:
 - `today 12:35`

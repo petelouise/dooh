@@ -32,21 +32,34 @@ func TestColumnOrderTitleFirstIDLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(rendered, "\r\n"), "\r\n")
-	if len(lines) < 7 {
-		t.Fatalf("expected header + body lines, got %d", len(lines))
+	header := ""
+	body := ""
+	for _, line := range lines {
+		if strings.Contains(line, "Title") && strings.Contains(line, "Priority") && strings.Contains(line, "Updated") && strings.Contains(line, "ID") {
+			header = line
+		}
+		if strings.Contains(line, "Critical fix title") && strings.Contains(line, "t_AAAAAA") {
+			body = line
+		}
 	}
-	header := lines[4]
-	if !(strings.Index(header, "Title") < strings.Index(header, "Status") &&
-		strings.Index(header, "Status") < strings.Index(header, "Priority") &&
+	if header == "" {
+		t.Fatalf("missing table header in frame")
+	}
+	if body == "" {
+		t.Fatalf("missing task body row in frame")
+	}
+	if !(strings.Index(header, "Title") < strings.Index(header, "Priority") &&
 		strings.Index(header, "Priority") < strings.Index(header, "Updated") &&
 		strings.Index(header, "Updated") < strings.Index(header, "ID")) {
 		t.Fatalf("unexpected column order: %q", header)
 	}
-	body := lines[6]
-	if !(strings.Index(body, "Critical fix title") < strings.Index(body, "open") &&
-		strings.Index(body, "open") < strings.Index(body, "now") &&
-		strings.Index(body, "now") < strings.Index(body, "today")) {
+	if !(strings.Index(body, "Critical fix title") < strings.Index(body, "now") &&
+		strings.Index(body, "now") < strings.Index(body, "today") &&
+		strings.Index(body, "today") < strings.Index(body, "t_AAAAAA")) {
 		t.Fatalf("unexpected body column order: %q", body)
+	}
+	if !strings.Contains(body, "○") {
+		t.Fatalf("expected open status icon in body row: %q", body)
 	}
 }
 
@@ -68,6 +81,44 @@ func TestDetailExpandCollapse(t *testing.T) {
 	}
 	if strings.Contains(collapsed, "title: Critical fix title") {
 		t.Fatalf("expected detail to be collapsed")
+	}
+}
+
+func TestDefaultStatusFilterOpen(t *testing.T) {
+	sqlite := newTUIDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,updated_at) VALUES('2','t_BBBBBB','Completed row','completed','later',"+db.Quote(now)+");")
+	m := testModel(sqlite)
+	rendered, err := m.render(120, 22)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rendered, "Completed row") {
+		t.Fatalf("completed task should be hidden by default open filter")
+	}
+}
+
+func TestFuzzyFilterLiveTyping(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.handleKey("/")
+	m.handleKey("c")
+	m.handleKey("f")
+	m.handleKey("t")
+	rendered, err := m.render(120, 22)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "Critical fix title") {
+		t.Fatalf("expected fuzzy live filter to match critical fix title")
+	}
+	m.handleKey("z")
+	rendered, err = m.render(120, 22)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rendered, "Critical fix title") {
+		t.Fatalf("expected row filtered out after non-matching key")
 	}
 }
 

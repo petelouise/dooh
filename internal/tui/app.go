@@ -24,6 +24,23 @@ type row struct {
 	Collection string
 }
 
+type progressRow struct {
+	ID    string
+	Name  string
+	Total int
+	Done  int
+	Open  int
+}
+
+type palette struct {
+	Accent  int
+	Open    int
+	Done    int
+	Archive int
+	Muted   int
+	Warn    int
+}
+
 type model struct {
 	sqlite         db.SQLite
 	themes         []Theme
@@ -35,6 +52,7 @@ type model struct {
 	limit          int
 	loc            *time.Location
 	plain          bool
+	view           string
 
 	editFilter  bool
 	filterDraft string
@@ -121,11 +139,12 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 		themes:         catalog.Themes,
 		themeIndex:     idx,
 		filter:         strings.TrimSpace(filter),
-		statusFilter:   "all",
+		statusFilter:   "open",
 		priorityFilter: "all",
 		limit:          limit,
 		loc:            loc,
 		plain:          plain,
+		view:           "tasks",
 	}
 }
 
@@ -133,18 +152,21 @@ func (m *model) handleKey(key string) bool {
 	if m.editFilter {
 		switch key {
 		case "enter":
-			m.filter = strings.TrimSpace(m.filterDraft)
 			m.editFilter = false
-			m.selected = 0
 		case "esc":
 			m.editFilter = false
+			m.filterDraft = m.filter
 		case "backspace":
 			if len(m.filterDraft) > 0 {
 				m.filterDraft = m.filterDraft[:len(m.filterDraft)-1]
+				m.filter = strings.TrimSpace(m.filterDraft)
+				m.selected = 0
 			}
 		default:
 			if len(key) == 1 {
 				m.filterDraft += key
+				m.filter = strings.TrimSpace(m.filterDraft)
+				m.selected = 0
 			}
 		}
 		return false
@@ -158,14 +180,16 @@ func (m *model) handleKey(key string) bool {
 	case "down":
 		m.selected++
 	case "right":
-		m.toggleExpand()
+		if m.view == "tasks" || m.view == "today" {
+			m.toggleExpand()
+		}
 	case "left":
 		m.expandedID = ""
 	case "/":
 		m.editFilter = true
 		m.filterDraft = m.filter
 	case "s":
-		m.statusFilter = cycle([]string{"all", "open", "completed", "archived"}, m.statusFilter)
+		m.statusFilter = cycle([]string{"open", "all", "completed", "archived"}, m.statusFilter)
 		m.selected = 0
 		m.expandedID = ""
 	case "p":
@@ -174,14 +198,31 @@ func (m *model) handleKey(key string) bool {
 		m.expandedID = ""
 	case "c":
 		m.filter = ""
+		m.filterDraft = ""
+		m.statusFilter = "open"
+		m.priorityFilter = "all"
 		m.selected = 0
 		m.expandedID = ""
 	case "t":
 		if len(m.themes) > 0 {
 			m.themeIndex = (m.themeIndex + 1) % len(m.themes)
 		}
+	case "1":
+		m.switchView("tasks")
+	case "2":
+		m.switchView("projects")
+	case "3":
+		m.switchView("goals")
+	case "4":
+		m.switchView("today")
 	}
 	return false
+}
+
+func (m *model) switchView(v string) {
+	m.view = v
+	m.selected = 0
+	m.expandedID = ""
 }
 
 func (m *model) toggleExpand() {
@@ -214,33 +255,14 @@ func (m *model) render(cols int, lines int) (string, error) {
 	if lines < 18 {
 		lines = 18
 	}
-
-	rows, err := m.filteredRows()
+	p := paletteForTheme(m.themes[m.themeIndex].ID)
+	body, countLine, selectedLine, err := m.renderBodyByView(cols, lines, p)
 	if err != nil {
 		return "", err
 	}
-	if len(rows) == 0 {
-		m.selected = 0
-		m.expandedID = ""
-	} else {
-		m.selected = clampIndex(m.selected, len(rows))
-	}
-
-	counts := countStatus(rows)
-	now := time.Now()
-
-	statusW := 9
-	priorityW := 8
-	updatedW := 17
-	idW := 8
-	separatorW := 4
-	titleW := cols - (2 + separatorW + statusW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
-	if titleW < 16 {
-		titleW = 16
-	}
 
 	headerLines := 6
-	footerLines := 3
+	footerLines := 2
 	bodyBudget := lines - headerLines - footerLines
 	if bodyBudget < 4 {
 		bodyBudget = 4
@@ -249,34 +271,26 @@ func (m *model) render(cols int, lines int) (string, error) {
 		bodyBudget = m.limit
 	}
 
-	bodyLines := m.composeBody(rows, bodyBudget, titleW, statusW, priorityW, updatedW, idW, cols, now)
-
 	frame := make([]string, 0, lines)
-	titleLine := fmt.Sprintf("dooh interactive  theme=%s  filter=/%s  status=%s  priority=%s", m.themes[m.themeIndex].Name, m.filter, m.statusFilter, m.priorityFilter)
-	frame = append(frame, m.paintHeader(clampLine(titleLine, cols)))
-	frame = append(frame, strings.Repeat("-", cols))
-	frame = append(frame, clampLine(fmt.Sprintf("open %d  completed %d  archived %d", counts["open"], counts["completed"], counts["archived"]), cols))
-	frame = append(frame, strings.Repeat("-", cols))
-	frame = append(frame, clampLine(fmt.Sprintf("%-2s %-*s  %-*s  %-*s  %-*s  %-*s", "", titleW, "Title", statusW, "Status", priorityW, "Priority", updatedW, "Updated", idW, "ID"), cols))
-	frame = append(frame, strings.Repeat("-", cols))
+	titleLine := fmt.Sprintf("dooh interactive  theme=%s  view=%s  filter=/%s  status=%s  priority=%s", m.themes[m.themeIndex].Name, m.view, m.activeFilter(), m.statusFilter, m.priorityFilter)
+	frame = append(frame, m.paintAccent(clampLine(titleLine, cols), p.Accent))
+	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
+	frame = append(frame, clampLine(renderTabs(cols, m.view), cols))
+	frame = append(frame, clampLine(countLine, cols))
+	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
+	frame = append(frame, m.renderHeader(cols, p))
 
-	frame = append(frame, bodyLines...)
+	frame = append(frame, body...)
 	for len(frame) < headerLines+bodyBudget {
 		frame = append(frame, "")
 	}
 
-	frame = append(frame, strings.Repeat("-", cols))
-	if len(rows) > 0 {
-		r := rows[m.selected]
-		footer := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
-		frame = append(frame, clampLine(footer, cols))
-	} else {
-		frame = append(frame, "selected: none")
-	}
+	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
+	frame = append(frame, clampLine(selectedLine, cols))
 	if m.editFilter {
-		frame = append(frame, clampLine("filter> "+m.filterDraft+" (Enter apply, Esc cancel)", cols))
+		frame = append(frame, clampLine("filter> "+m.filterDraft+" (live fuzzy; Enter close, Esc close)", cols))
 	} else {
-		frame = append(frame, clampLine("keys: arrows navigate, right expand, left collapse, / filter, s status, p priority, t theme, c clear, q quit", cols))
+		frame = append(frame, clampLine("keys: arrows, / live filter, s status, p priority, c clear(all), t theme, 1 tasks, 2 projects, 3 goals, 4 today, q quit", cols))
 	}
 
 	if len(frame) > lines {
@@ -288,11 +302,120 @@ func (m *model) render(cols int, lines int) (string, error) {
 	return joinFrame(frame), nil
 }
 
-func (m *model) composeBody(rows []row, budget int, titleW, statusW, priorityW, updatedW, idW, cols int, now time.Time) []string {
-	if len(rows) == 0 {
-		return []string{"(no tasks)"}
+func (m *model) renderHeader(cols int, p palette) string {
+	if m.view == "projects" || m.view == "goals" {
+		nameW := cols - (2 + 2 + 18 + 5 + 4 + 4)
+		if nameW < 18 {
+			nameW = 18
+		}
+		h := fmt.Sprintf("%-2s %-*s  %-18s  %-5s  %-4s  %-4s", "", nameW, "Name", "Progress", "%", "Done", "Open")
+		return m.paintMuted(clampLine(h, cols), p)
 	}
+	iconW := 1
+	priorityW := 8
+	updatedW := 17
+	idW := 8
+	separatorW := 4
+	titleW := cols - (2 + separatorW + iconW + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	if titleW < 16 {
+		titleW = 16
+	}
+	h := fmt.Sprintf("%-2s %-*s  %-1s  %-*s  %-*s  %-*s", "", titleW, "Title", " ", priorityW, "Priority", updatedW, "Updated", idW, "ID")
+	return m.paintMuted(clampLine(h, cols), p)
+}
 
+func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, string, error) {
+	now := time.Now()
+	headerLines := 6
+	footerLines := 2
+	bodyBudget := lines - headerLines - footerLines
+	if bodyBudget < 4 {
+		bodyBudget = 4
+	}
+	if bodyBudget > m.limit {
+		bodyBudget = m.limit
+	}
+	switch m.view {
+	case "projects":
+		rows, err := m.loadProgressRows("project")
+		if err != nil {
+			return nil, "", "", err
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			m.selected = 0
+			return []string{"(no project rows)"}, "projects", "selected: none", nil
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p)
+		r := rows[m.selected]
+		selected := fmt.Sprintf("selected project: %s | completion=%d%% (%d/%d)", r.Name, pct(r.Done, r.Total), r.Done, r.Total)
+		return linesOut, fmt.Sprintf("projects=%d", len(rows)), selected, nil
+	case "goals":
+		rows, err := m.loadProgressRows("goal")
+		if err != nil {
+			return nil, "", "", err
+		}
+		rows = m.applyProgressFilter(rows)
+		if len(rows) == 0 {
+			m.selected = 0
+			return []string{"(no goal rows)"}, "goals", "selected: none", nil
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		linesOut := m.composeProgressBody(rows, bodyBudget, cols, p)
+		r := rows[m.selected]
+		selected := fmt.Sprintf("selected goal: %s | completion=%d%% (%d/%d)", r.Name, pct(r.Done, r.Total), r.Done, r.Total)
+		return linesOut, fmt.Sprintf("goals=%d", len(rows)), selected, nil
+	case "today":
+		rows, err := m.filteredRows()
+		if err != nil {
+			return nil, "", "", err
+		}
+		todayRows := make([]row, 0, len(rows))
+		for _, r := range rows {
+			if isTodayScheduled(r.Scheduled, m.loc, now) {
+				todayRows = append(todayRows, r)
+			}
+		}
+		if len(todayRows) == 0 {
+			m.selected = 0
+			m.expandedID = ""
+			return []string{"(no tasks scheduled today)"}, "today: scheduled=0", "selected: none", nil
+		}
+		m.selected = clampIndex(m.selected, len(todayRows))
+		linesOut := m.composeTaskBody(todayRows, bodyBudget, cols, now, p)
+		r := todayRows[m.selected]
+		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
+		return linesOut, fmt.Sprintf("today: scheduled=%d", len(todayRows)), selected, nil
+	default:
+		rows, err := m.filteredRows()
+		if err != nil {
+			return nil, "", "", err
+		}
+		if len(rows) == 0 {
+			m.selected = 0
+			m.expandedID = ""
+			return []string{"(no tasks)"}, "open 0  completed 0  archived 0", "selected: none", nil
+		}
+		m.selected = clampIndex(m.selected, len(rows))
+		counts := countStatus(rows)
+		linesOut := m.composeTaskBody(rows, bodyBudget, cols, now, p)
+		r := rows[m.selected]
+		selected := fmt.Sprintf("selected: %s | due=%s | scheduled=%s | collections=%s", r.Title, NaturalDate(r.DueAt, m.loc, now), NaturalDate(r.Scheduled, m.loc, now), r.Collection)
+		return linesOut, fmt.Sprintf("open %d  completed %d  archived %d", counts["open"], counts["completed"], counts["archived"]), selected, nil
+	}
+}
+
+func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time, p palette) []string {
+	iconW := 1
+	priorityW := 8
+	updatedW := 17
+	idW := 8
+	separatorW := 4
+	titleW := cols - (2 + separatorW + iconW + separatorW + separatorW + priorityW + separatorW + updatedW + separatorW + idW)
+	if titleW < 16 {
+		titleW = 16
+	}
 	start := 0
 	if m.selected >= budget {
 		start = m.selected - budget + 1
@@ -300,7 +423,6 @@ func (m *model) composeBody(rows []row, budget int, titleW, statusW, priorityW, 
 	if start < 0 {
 		start = 0
 	}
-
 	lines := make([]string, 0, budget)
 	for i := start; i < len(rows) && len(lines) < budget; i++ {
 		r := rows[i]
@@ -308,21 +430,23 @@ func (m *model) composeBody(rows []row, budget int, titleW, statusW, priorityW, 
 		if i == m.selected {
 			mark = ">"
 		}
-		rowLine := fmt.Sprintf("%-2s %-*s  %-*s  %-*s  %-*s  %-*s",
+		icon := statusIcon(r.Status)
+		rowLine := fmt.Sprintf("%-2s %-*s  %-1s  %-*s  %-*s  %-*s",
 			mark,
 			titleW, clampLine(r.Title, titleW),
-			statusW, r.Status,
+			icon,
 			priorityW, r.Priority,
 			updatedW, NaturalDate(r.UpdatedAt, m.loc, now),
 			idW, r.ID,
 		)
 		line := clampLine(rowLine, cols)
+		line = m.paintStatusMarker(line, icon, r.Status, p)
 		if i == m.selected {
-			line = m.paintSelected(line)
+			line = m.paintSelected(line, p)
 		}
 		lines = append(lines, line)
 
-		if m.expandedID == r.ID && len(lines) < budget {
+		if m.expandedID == r.ID && len(lines) < budget && (m.view == "tasks" || m.view == "today") {
 			detail := []string{
 				"title: " + r.Title,
 				"due: " + NaturalDate(r.DueAt, m.loc, now),
@@ -342,6 +466,37 @@ func (m *model) composeBody(rows []row, budget int, titleW, statusW, priorityW, 
 				}
 			}
 		}
+	}
+	return lines
+}
+
+func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p palette) []string {
+	nameW := cols - (2 + 2 + 18 + 5 + 4 + 4)
+	if nameW < 18 {
+		nameW = 18
+	}
+	start := 0
+	if m.selected >= budget {
+		start = m.selected - budget + 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	lines := make([]string, 0, budget)
+	for i := start; i < len(rows) && len(lines) < budget; i++ {
+		r := rows[i]
+		mark := " "
+		if i == m.selected {
+			mark = ">"
+		}
+		bar := progressBar(r.Done, r.Total, 18)
+		bar = m.paintAccent(bar, p.Accent)
+		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %4d  %4d", mark, nameW, clampLine(r.Name, nameW), bar, pct(r.Done, r.Total), r.Done, r.Open)
+		line = clampLine(line, cols)
+		if i == m.selected {
+			line = m.paintSelected(line, p)
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }
@@ -376,8 +531,45 @@ ORDER BY t.updated_at DESC;`)
 	return out, nil
 }
 
+func (m *model) loadProgressRows(kind string) ([]progressRow, error) {
+	rows, err := m.sqlite.QueryTSV(`
+SELECT
+  c.short_id,
+  c.name,
+  COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.status IN ('completed','archived') THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN t.status='open' THEN 1 ELSE 0 END), 0)
+FROM collections c
+LEFT JOIN task_collections tc ON tc.collection_id=c.id
+LEFT JOIN tasks t ON t.id=tc.task_id AND t.deleted_at IS NULL
+WHERE c.deleted_at IS NULL AND c.kind=` + db.Quote(kind) + `
+GROUP BY c.id
+ORDER BY c.updated_at DESC, c.name ASC;`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]progressRow, 0, len(rows))
+	for _, r := range rows {
+		if len(r) < 5 {
+			continue
+		}
+		total, _ := strconv.Atoi(r[2])
+		done, _ := strconv.Atoi(r[3])
+		open, _ := strconv.Atoi(r[4])
+		out = append(out, progressRow{ID: r[0], Name: r[1], Total: total, Done: done, Open: open})
+	}
+	return out, nil
+}
+
+func (m *model) activeFilter() string {
+	if m.editFilter {
+		return strings.TrimSpace(m.filterDraft)
+	}
+	return strings.TrimSpace(m.filter)
+}
+
 func (m *model) applyFilters(in []row) []row {
-	f := strings.ToLower(strings.TrimSpace(m.filter))
+	f := strings.ToLower(m.activeFilter())
 	out := make([]row, 0, len(in))
 	for _, r := range in {
 		if m.statusFilter != "all" && r.Status != m.statusFilter {
@@ -388,11 +580,25 @@ func (m *model) applyFilters(in []row) []row {
 		}
 		if f != "" {
 			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Status, r.Priority, r.Collection}, " "))
-			if !strings.Contains(h, f) {
+			if !fuzzyMatch(h, f) {
 				continue
 			}
 		}
 		out = append(out, r)
+	}
+	return out
+}
+
+func (m *model) applyProgressFilter(in []progressRow) []progressRow {
+	f := strings.ToLower(m.activeFilter())
+	if f == "" {
+		return in
+	}
+	out := make([]progressRow, 0, len(in))
+	for _, r := range in {
+		if fuzzyMatch(strings.ToLower(strings.Join([]string{r.Name, r.ID}, " ")), f) {
+			out = append(out, r)
+		}
 	}
 	return out
 }
@@ -415,6 +621,17 @@ func cycle(values []string, current string) string {
 		return current
 	}
 	return values[0]
+}
+
+func statusIcon(status string) string {
+	switch status {
+	case "completed":
+		return "✓"
+	case "archived":
+		return "✕"
+	default:
+		return "○"
+	}
 }
 
 func wrapText(s string, width int) []string {
@@ -473,33 +690,131 @@ func clampIndex(v int, count int) int {
 	return v
 }
 
-func (m *model) paintHeader(s string) string {
-	if m.plain || strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
-		return s
-	}
-	return fmt.Sprintf("\x1b[38;5;%dm%s\x1b[0m", colorForTheme(m.themes[m.themeIndex].ID), s)
+func renderTabs(cols int, active string) string {
+	t := []string{"[1 tasks]", "[2 projects]", "[3 goals]", "[4 today]"}
+	s := strings.Join(t, "  ") + "  (active: " + active + ")"
+	return clampLine(s, cols)
 }
 
-func (m *model) paintSelected(s string) string {
-	if m.plain || strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
-		return s
+func progressBar(done, total, width int) string {
+	if width < 4 {
+		width = 4
 	}
-	return strings.Replace(s, ">", "\x1b[38;5;220m>\x1b[0m", 1)
+	filled := 0
+	if total > 0 {
+		filled = (done * width) / total
+	}
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
 }
 
-func colorForTheme(id string) int {
+func pct(done, total int) int {
+	if total <= 0 {
+		return 0
+	}
+	v := (done * 100) / total
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+func isTodayScheduled(s string, loc *time.Location, now time.Time) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	t, ok := parseTime(s)
+	if !ok {
+		return false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	st := t.In(loc)
+	n := now.In(loc)
+	sy, sm, sd := st.Date()
+	ny, nm, nd := n.Date()
+	return sy == ny && sm == nm && sd == nd
+}
+
+func fuzzyMatch(hay, needle string) bool {
+	hay = strings.TrimSpace(strings.ToLower(hay))
+	needle = strings.TrimSpace(strings.ToLower(needle))
+	if needle == "" {
+		return true
+	}
+	h := []rune(hay)
+	n := []rune(needle)
+	j := 0
+	for i := 0; i < len(h) && j < len(n); i++ {
+		if h[i] == n[j] {
+			j++
+		}
+	}
+	return j == len(n)
+}
+
+func paletteForTheme(id string) palette {
 	switch id {
 	case "sunset-pop":
-		return 209
+		return palette{Accent: 209, Open: 214, Done: 120, Archive: 208, Muted: 246, Warn: 220}
 	case "mint-circuit":
-		return 79
+		return palette{Accent: 79, Open: 50, Done: 84, Archive: 117, Muted: 245, Warn: 159}
 	case "paper-fruit":
-		return 167
+		return palette{Accent: 167, Open: 174, Done: 107, Archive: 131, Muted: 246, Warn: 180}
 	case "midnight-arcade":
-		return 45
+		return palette{Accent: 45, Open: 81, Done: 119, Archive: 39, Muted: 110, Warn: 228}
 	default:
-		return 81
+		return palette{Accent: 81, Open: 39, Done: 120, Archive: 208, Muted: 245, Warn: 220}
 	}
+}
+
+func (m *model) colorize(s string, code int) string {
+	if m.plain {
+		return s
+	}
+	return fmt.Sprintf("\x1b[38;5;%dm%s\x1b[0m", code, s)
+}
+
+func (m *model) paintAccent(s string, code int) string {
+	return m.colorize(s, code)
+}
+
+func (m *model) paintMuted(s string, p palette) string {
+	return m.colorize(s, p.Muted)
+}
+
+func (m *model) paintStatus(s string, status string, p palette) string {
+	switch status {
+	case "completed":
+		return m.colorize(s, p.Done)
+	case "archived":
+		return m.colorize(s, p.Archive)
+	default:
+		return m.colorize(s, p.Open)
+	}
+}
+
+func (m *model) paintStatusMarker(line string, marker string, status string, p palette) string {
+	if m.plain {
+		return line
+	}
+	return strings.Replace(line, marker, m.paintStatus(marker, status, p), 1)
+}
+
+func (m *model) paintSelected(s string, p palette) string {
+	if m.plain {
+		return s
+	}
+	return strings.Replace(s, ">", fmt.Sprintf("\x1b[38;5;%dm>\x1b[0m", p.Warn), 1)
 }
 
 func readKey(r *bufio.Reader) (string, error) {
