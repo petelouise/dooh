@@ -1,4 +1,7 @@
 .cache/
+.gocache/
 /dooh
 *.db
+*.db-shm
+*.db-wal
 site-data/
