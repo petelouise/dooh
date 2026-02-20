@@ -178,13 +178,15 @@ TUI controls:
 - `right`: expand selected task inline
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
-- `Tab` / `Shift+Tab`: jump into filter editors (cycles fields)
+- `Tab` / `Shift+Tab`: focus filter chips (cycles fields)
+- `Enter` (while filter chip is focused): open that filter editor
 - `f`: edit text filter (supports quick tokens: `#[tag]`, `~[area]`, `^[goal]`, `@[assignee]`, `!due`, `!todaydue`, `!overdue`, `!nodue`)
 - `g`: edit tags filter (typeahead + counts, multi-tag AND)
 - `a`: edit assignee filter (typeahead + counts)
-- `s`: cycle status filter
+- `s`: cycle status filter (`open -> all -> completed -> archived`)
 - `p`: cycle priority filter
 - `o`: cycle sort (`updated`, `priority`, `scheduled`)
+- `Shift+O`: reverse sort order (`asc`/`desc`)
 - `t`: randomize theme
 - `1`: task list view
 - `2`: project progress view
@@ -200,7 +202,7 @@ View headers are context-aware:
 
 TUI is currently read-focused:
 - no command bar workflow is required
-- filters are always visible at the top: text/status/priority/tag/assignee/scope
+- filters are always visible at the top: text/status/priority/sort/order/tag/assignee/scope
 - token matching is partial by default (`~tree` matches `Maple Trees` and `Oak Trees`)
 - `today` view defaults to tasks assigned to the authenticated user
 - toggle `mine/all` in Today view by editing the `today` filter chip (`Tab` then `Enter`)

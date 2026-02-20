@@ -57,6 +57,7 @@ type FilterState struct {
 	Status    string
 	Priority  string
 	Sort      string
+	SortDir   string
 	Tags      []string
 	Assignee  string
 	ScopeKind string
@@ -107,6 +108,7 @@ type model struct {
 	scopeColor string
 
 	filterFocus    int
+	filterBarFocus bool
 	editFilter     bool
 	editField      int
 	fieldInput     string
@@ -206,6 +208,7 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 			Status:    "open",
 			Priority:  "all",
 			Sort:      "updated",
+			SortDir:   "desc",
 			TodayMode: "mine",
 		},
 		limit:           limit,
@@ -228,7 +231,7 @@ func (m *model) handleKey(key string) bool {
 			} else {
 				m.filterFocus = m.nextFilterFocus(-1)
 			}
-			m.beginFilterEdit(m.filterFocus)
+			m.filterBarFocus = true
 			return false
 		}
 		m.handleFilterEdit(key)
@@ -240,33 +243,45 @@ func (m *model) handleKey(key string) bool {
 		return true
 	case "tab":
 		m.filterFocus = m.nextFilterFocus(1)
-		m.beginFilterEdit(m.filterFocus)
+		m.filterBarFocus = true
 	case "shift_tab":
 		m.filterFocus = m.nextFilterFocus(-1)
-		m.beginFilterEdit(m.filterFocus)
+		m.filterBarFocus = true
 	case "up":
+		m.filterBarFocus = false
 		m.selected--
 	case "down":
+		m.filterBarFocus = false
 		m.selected++
 	case "right":
+		m.filterBarFocus = false
 		if m.view == "tasks" || m.view == "today" {
 			m.toggleExpand()
 		}
 	case "left":
+		m.filterBarFocus = false
 		m.expandedID = ""
 	case "enter":
-		m.enterSelected()
+		if m.filterBarFocus {
+			m.beginFilterEdit(m.filterFocus)
+		} else {
+			m.enterSelected()
+		}
 	case "/":
 		m.filterFocus = filterFieldText
+		m.filterBarFocus = true
 		m.beginFilterEdit(filterFieldText)
 	case "f":
 		m.filterFocus = filterFieldText
+		m.filterBarFocus = true
 		m.beginFilterEdit(filterFieldText)
 	case "g":
 		m.filterFocus = filterFieldTags
+		m.filterBarFocus = true
 		m.beginFilterEdit(filterFieldTags)
 	case "a":
 		m.filterFocus = filterFieldAssignee
+		m.filterBarFocus = true
 		m.beginFilterEdit(filterFieldAssignee)
 	case "s":
 		m.filters.Status = cycle([]string{"open", "all", "completed", "archived"}, m.filters.Status)
@@ -278,6 +293,11 @@ func (m *model) handleKey(key string) bool {
 		m.expandedID = ""
 	case "o":
 		m.filters.Sort = cycle([]string{"updated", "priority", "scheduled"}, m.filters.Sort)
+		m.filters.SortDir = defaultSortDirection(m.filters.Sort)
+		m.selected = 0
+		m.expandedID = ""
+	case "O":
+		m.filters.SortDir = toggleSortDirection(m.filters.SortDir)
 		m.selected = 0
 		m.expandedID = ""
 	case "c":
@@ -327,6 +347,7 @@ func (m *model) nextFilterFocus(delta int) int {
 func (m *model) beginFilterEdit(field int) {
 	m.editFilter = true
 	m.editField = field
+	m.filterBarFocus = true
 	m.dropdownOpen = false
 	m.dropdown = nil
 	m.dropdownIndex = 0
@@ -549,6 +570,7 @@ func (m *model) clearFiltersAndScope() {
 	m.filters.Status = "open"
 	m.filters.Priority = "all"
 	m.filters.Sort = "updated"
+	m.filters.SortDir = "desc"
 	m.filters.Tags = nil
 	m.filters.Assignee = ""
 	m.filters.ScopeKind = ""
@@ -558,6 +580,7 @@ func (m *model) clearFiltersAndScope() {
 	m.scopeColor = ""
 	m.selected = 0
 	m.expandedID = ""
+	m.filterBarFocus = false
 }
 
 func (m *model) randomizeTheme() {
@@ -660,9 +683,9 @@ func (m *model) render(cols int, lines int) (string, error) {
 		frame = append(frame, m.paintFooterLine(selectedLine, cols, p))
 	}
 	if m.editFilter {
-		frame = append(frame, m.paintFooterLine("filter tokens: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue | Enter select/add | Esc close", cols, p))
+		frame = append(frame, m.paintFooterLine("filter: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue | Enter select/add | Esc close", cols, p))
 	} else {
-		frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab filter, / text, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
+		frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab focus, / text, s status, p priority, o sort, O reverse", cols, p))
 	}
 
 	if len(frame) > lines {
@@ -1134,7 +1157,7 @@ func (m *model) applyFilters(in []row) []row {
 		}
 		out = append(out, r)
 	}
-	sortRows(out, m.filters.Sort, m.loc)
+	sortRows(out, m.filters.Sort, m.filters.SortDir, m.loc)
 	return out
 }
 
@@ -1367,48 +1390,25 @@ func fallbackDash(v string) string {
 func (m *model) renderFilterBar(scope string, cols int) string {
 	p := paletteForTheme(m.themes[m.themeIndex].ID)
 	qf := parseQuickFilter(m.activeFilter())
-	quickTokens := make([]string, 0, 12)
-	for _, t := range qf.Tags {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("#["+t+"]", "tag", p))
-	}
-	for _, a := range qf.Areas {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("~["+a+"]", "area", p))
-	}
-	for _, g := range qf.Goals {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("^["+g+"]", "goal", p))
-	}
-	for _, a := range qf.Assignees {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("@["+a+"]", "assignee", p))
-	}
-	if qf.HasDue {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("!due", "due", p))
-	}
-	if qf.TodayDue {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("!todaydue", "due", p))
-	}
-	if qf.NoDue {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("!nodue", "due", p))
-	}
-	if qf.Overdue {
-		quickTokens = append(quickTokens, m.renderQuickTokenChip("!overdue", "overdue", p))
-	}
-	quickDisplay := fallbackDash(strings.Join(limitTokens(quickTokens, 8), " "))
+	textDisplay := m.renderTextChipValue(qf, p)
+	tagsDisplay := fallbackDash(strings.Join(mergeTokenValues(m.filters.Tags, qf.Tags), ","))
+	assigneeDisplay := fallbackDash(strings.Join(mergeTokenValues(singleValueList(m.filters.Assignee), qf.Assignees), ","))
 	parts := []string{
-		m.renderChip("text", fallbackDash(qf.Text), m.filterFocus == filterFieldText && !m.editFilter, p),
-		m.renderChip("quick", quickDisplay, false, p),
-		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter, p),
-		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter, p),
+		m.renderChip("text", textDisplay, m.filterFocus == filterFieldText && m.filterBarFocus && !m.editFilter, p),
+		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && m.filterBarFocus && !m.editFilter, p),
+		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && m.filterBarFocus && !m.editFilter, p),
 		m.renderChip("sort", m.filters.Sort, false, p),
-		m.renderChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter, p),
-		m.renderChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter, p),
+		m.renderChip("order", normalizeSortDirection(m.filters.SortDir), false, p),
+		m.renderChip("tags", tagsDisplay, m.filterFocus == filterFieldTags && m.filterBarFocus && !m.editFilter, p),
+		m.renderChip("assignee", assigneeDisplay, m.filterFocus == filterFieldAssignee && m.filterBarFocus && !m.editFilter, p),
 	}
 	if strings.TrimSpace(scope) != "" {
 		parts = append(parts, m.renderChip("scope", scope, false, p))
 	}
 	if m.view == "today" {
-		parts = append(parts, m.renderChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && !m.editFilter, p))
+		parts = append(parts, m.renderChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && m.filterBarFocus && !m.editFilter, p))
 	}
-	line := "FILTERS  " + strings.Join(parts, " ")
+	line := "FILTERS(status=open|all|completed|archived)  " + strings.Join(parts, " ")
 	return clampLine(line, cols)
 }
 
@@ -1417,11 +1417,66 @@ func (m *model) renderChip(k string, v string, focused bool, _ palette) string {
 	if m.plain {
 		return raw
 	}
-	// Avoid nested ANSI resets inside the full-line bar style; use subtle text markers.
 	if focused {
-		return "{" + k + ":" + v + "}"
+		return "\x1b[1m" + raw + "\x1b[0m"
 	}
 	return raw
+}
+
+func singleValueList(v string) []string {
+	t := strings.TrimSpace(v)
+	if t == "" {
+		return nil
+	}
+	return []string{t}
+}
+
+func mergeTokenValues(base []string, extra []string) []string {
+	out := make([]string, 0, len(base)+len(extra))
+	for _, v := range base {
+		t := strings.TrimSpace(v)
+		if t == "" || containsExact(out, t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	for _, v := range extra {
+		t := strings.TrimSpace(v)
+		if t == "" || containsExact(out, t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func (m *model) renderTextChipValue(qf quickFilter, p palette) string {
+	parts := make([]string, 0, 8)
+	if strings.TrimSpace(qf.Text) != "" {
+		parts = append(parts, qf.Text)
+	}
+	for _, a := range qf.Areas {
+		parts = append(parts, m.renderQuickTokenChip("~["+a+"]", "area", p))
+	}
+	for _, g := range qf.Goals {
+		parts = append(parts, m.renderQuickTokenChip("^["+g+"]", "goal", p))
+	}
+	if qf.HasDue {
+		parts = append(parts, m.renderQuickTokenChip("!due", "due", p))
+	}
+	if qf.TodayDue {
+		parts = append(parts, m.renderQuickTokenChip("!todaydue", "due", p))
+	}
+	if qf.NoDue {
+		parts = append(parts, m.renderQuickTokenChip("!nodue", "due", p))
+	}
+	if qf.Overdue {
+		parts = append(parts, m.renderQuickTokenChip("!overdue", "overdue", p))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(limitTokens(parts, 6), " ")
 }
 
 func limitTokens(tokens []string, max int) []string {
@@ -1846,32 +1901,98 @@ func matchesAllInCSV(csv string, wants []string) bool {
 	return true
 }
 
-func sortRows(rows []row, mode string, loc *time.Location) {
-	switch strings.TrimSpace(mode) {
+func sortRows(rows []row, mode string, dir string, loc *time.Location) {
+	mode = strings.TrimSpace(mode)
+	dir = normalizeSortDirection(dir)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if mode == "scheduled" {
+			_, iOK := scheduledUnix(rows[i].Scheduled, loc)
+			_, jOK := scheduledUnix(rows[j].Scheduled, loc)
+			if iOK != jOK {
+				return iOK
+			}
+		}
+		cmp := compareRows(rows[i], rows[j], mode, loc)
+		if cmp == 0 {
+			return false
+		}
+		if dir == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func compareRows(a row, b row, mode string, loc *time.Location) int {
+	switch mode {
 	case "priority":
-		sort.SliceStable(rows, func(i, j int) bool {
-			pi := priorityRank(rows[i].Priority)
-			pj := priorityRank(rows[j].Priority)
-			if pi != pj {
-				return pi < pj
-			}
-			return updatedUnix(rows[i].UpdatedAt, loc) > updatedUnix(rows[j].UpdatedAt, loc)
-		})
+		pa := priorityRank(a.Priority)
+		pb := priorityRank(b.Priority)
+		if pa != pb {
+			return compareInt64(int64(pa), int64(pb))
+		}
 	case "scheduled":
-		sort.SliceStable(rows, func(i, j int) bool {
-			si, siOK := scheduledUnix(rows[i].Scheduled, loc)
-			sj, sjOK := scheduledUnix(rows[j].Scheduled, loc)
-			if siOK != sjOK {
-				return siOK
-			}
-			if si != sj {
-				return si < sj
-			}
-			return updatedUnix(rows[i].UpdatedAt, loc) > updatedUnix(rows[j].UpdatedAt, loc)
-		})
+		sa, saOK := scheduledUnix(a.Scheduled, loc)
+		sb, sbOK := scheduledUnix(b.Scheduled, loc)
+		if saOK && sbOK && sa != sb {
+			return compareInt64(sa, sb)
+		}
 	default:
-		// Default DB order is updated_at DESC.
+		ua := updatedUnix(a.UpdatedAt, loc)
+		ub := updatedUnix(b.UpdatedAt, loc)
+		if ua != ub {
+			return compareInt64(ua, ub)
+		}
 	}
+	ua := updatedUnix(a.UpdatedAt, loc)
+	ub := updatedUnix(b.UpdatedAt, loc)
+	if ua != ub {
+		return compareInt64(ua, ub)
+	}
+	return compareText(strings.ToLower(strings.TrimSpace(a.ID)), strings.ToLower(strings.TrimSpace(b.ID)))
+}
+
+func compareInt64(a int64, b int64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func compareText(a string, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func normalizeSortDirection(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), "asc") {
+		return "asc"
+	}
+	return "desc"
+}
+
+func defaultSortDirection(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "priority", "scheduled":
+		return "asc"
+	default:
+		return "desc"
+	}
+}
+
+func toggleSortDirection(v string) string {
+	if normalizeSortDirection(v) == "asc" {
+		return "desc"
+	}
+	return "asc"
 }
 
 func priorityRank(v string) int {

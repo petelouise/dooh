@@ -174,15 +174,23 @@ func TestFilterFocusTabMoves(t *testing.T) {
 	if m.filterFocus == start {
 		t.Fatalf("expected tab to advance filter focus")
 	}
-	if !m.editFilter {
-		t.Fatalf("expected tab to open focused filter editor")
+	if !m.filterBarFocus {
+		t.Fatalf("expected tab to activate filter bar focus")
 	}
+	if m.editFilter {
+		t.Fatalf("tab should not auto-open filter editor")
+	}
+	m.handleKey("enter")
+	if !m.editFilter {
+		t.Fatalf("enter should open focused filter editor when filter bar has focus")
+	}
+	m.handleKey("esc")
 	m.handleKey("shift_tab")
 	if m.filterFocus != start {
 		t.Fatalf("expected shift_tab to restore filter focus")
 	}
-	if !m.editFilter {
-		t.Fatalf("expected shift_tab to keep editor active")
+	if !m.filterBarFocus {
+		t.Fatalf("expected filter bar to remain focused after shift_tab")
 	}
 }
 
@@ -365,6 +373,7 @@ func TestSortPriorityAndScheduled(t *testing.T) {
 	sqlite := newTUIDB(t)
 	m := testModel(sqlite)
 	m.filters.Sort = "priority"
+	m.filters.SortDir = "asc"
 	rows, err := m.filteredRows()
 	if err != nil {
 		t.Fatal(err)
@@ -377,6 +386,7 @@ func TestSortPriorityAndScheduled(t *testing.T) {
 	}
 
 	m.filters.Sort = "scheduled"
+	m.filters.SortDir = "asc"
 	rows, err = m.filteredRows()
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +398,99 @@ func TestSortPriorityAndScheduled(t *testing.T) {
 	secondScheduled, _ := parseTime(rows[1].Scheduled)
 	if firstScheduled.After(secondScheduled) {
 		t.Fatalf("expected scheduled sort ascending, got %s then %s", rows[0].Scheduled, rows[1].Scheduled)
+	}
+}
+
+func TestSortDirectionToggleAndReverseOrder(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Sort = "scheduled"
+	m.filters.SortDir = "asc"
+	ascRows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ascRows) < 2 {
+		t.Fatalf("expected at least 2 rows")
+	}
+	m.handleKey("O")
+	if m.filters.SortDir != "desc" {
+		t.Fatalf("expected O to toggle sort direction to desc, got %s", m.filters.SortDir)
+	}
+	descRows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descRows) < 2 {
+		t.Fatalf("expected at least 2 rows")
+	}
+	ascFirst, _ := parseTime(ascRows[0].Scheduled)
+	descFirst, _ := parseTime(descRows[0].Scheduled)
+	if !descFirst.After(ascFirst) && !descFirst.Equal(ascFirst) {
+		t.Fatalf("expected desc first row to be later-or-equal than asc first row")
+	}
+}
+
+func TestScheduledSortDateOnlyAndMissingLast(t *testing.T) {
+	sqlite := newTUIDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('5','t_EEEEEE','No schedule','open','later','','',"+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('6','t_FFFFFF','Date only schedule','open','later','','2026-02-17',"+db.Quote(now)+");")
+	m := testModel(sqlite)
+	m.filters.Sort = "scheduled"
+	m.filters.SortDir = "asc"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected non-empty rows for scheduled sort assertions")
+	}
+	if rows[len(rows)-1].Title != "No schedule" {
+		t.Fatalf("expected missing scheduled task at end in asc sort, got %q", rows[len(rows)-1].Title)
+	}
+	m.filters.SortDir = "desc"
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[len(rows)-1].Title != "No schedule" {
+		t.Fatalf("expected missing scheduled task at end in desc sort, got %q", rows[len(rows)-1].Title)
+	}
+	if _, ok := parseTime("2026-02-17"); !ok {
+		t.Fatalf("expected parseTime to support date-only values")
+	}
+}
+
+func TestNoQuickChipOrCurlyBracesInFilterBar(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.handleKey("tab")
+	rendered, err := m.render(120, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rendered, "[quick:") {
+		t.Fatalf("quick chip should be removed")
+	}
+	if strings.Contains(rendered, "{") || strings.Contains(rendered, "}") {
+		t.Fatalf("curly braces should not be used for chip focus")
+	}
+}
+
+func TestTextTokensHydrateTagAndAssigneeChips(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Text = "@[Human Demo] #[Bugs] !due"
+	rendered, err := m.render(240, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "[tags:Bugs]") {
+		t.Fatalf("expected tags chip to include token-derived tag")
+	}
+	if !strings.Contains(rendered, "[assignee:Human Demo]") {
+		t.Fatalf("expected assignee chip to include token-derived assignee")
 	}
 }
 
