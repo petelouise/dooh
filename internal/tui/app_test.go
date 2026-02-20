@@ -476,6 +476,9 @@ func TestNoQuickChipOrCurlyBracesInFilterBar(t *testing.T) {
 	if strings.Contains(rendered, "{") || strings.Contains(rendered, "}") {
 		t.Fatalf("curly braces should not be used for chip focus")
 	}
+	if !strings.Contains(rendered, "*[") {
+		t.Fatalf("expected focused chip marker in plain mode after tab")
+	}
 }
 
 func TestTextTokensHydrateTagAndAssigneeChips(t *testing.T) {

@@ -241,6 +241,10 @@ func (m *model) handleKey(key string) bool {
 	switch key {
 	case "q":
 		return true
+	case "esc":
+		m.filterBarFocus = false
+		m.editFilter = false
+		m.dropdownOpen = false
 	case "tab":
 		m.filterFocus = m.nextFilterFocus(1)
 		m.filterBarFocus = true
@@ -685,7 +689,11 @@ func (m *model) render(cols int, lines int) (string, error) {
 	if m.editFilter {
 		frame = append(frame, m.paintFooterLine("filter: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue | Enter select/add | Esc close", cols, p))
 	} else {
-		frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab focus, / text, s status, p priority, o sort, O reverse", cols, p))
+		if m.filterBarFocus {
+			frame = append(frame, m.paintFooterLine("filter focus: Tab next, Shift+Tab prev, Enter edit, Esc close | tokens: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue", cols, p))
+		} else {
+			frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab focus, / text, s status, p priority, o sort, O reverse", cols, p))
+		}
 	}
 
 	if len(frame) > lines {
@@ -1415,10 +1423,13 @@ func (m *model) renderFilterBar(scope string, cols int) string {
 func (m *model) renderChip(k string, v string, focused bool, _ palette) string {
 	raw := fmt.Sprintf("[%s:%s]", k, v)
 	if m.plain {
+		if focused {
+			return "*" + raw
+		}
 		return raw
 	}
 	if focused {
-		return "\x1b[1m" + raw + "\x1b[0m"
+		return "\x1b[7m" + raw + "\x1b[0m"
 	}
 	return raw
 }
