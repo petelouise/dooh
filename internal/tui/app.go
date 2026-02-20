@@ -593,7 +593,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 
 	frame := make([]string, 0, lines)
 	frame = append(frame, m.paintTitleBar(titleLine, cols, p))
-	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), p))
+	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), cols, p))
 	frame = append(frame, m.paintFilterBarLine(filterLine, cols, p))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, m.paintSubheaderLine(renderTabs(cols, m.view), cols, p))
@@ -1291,31 +1291,16 @@ func (m *model) renderFilterBar(scope string, cols int) string {
 	return clampLine(line, cols)
 }
 
-func (m *model) renderChip(k string, v string, focused bool, p palette) string {
+func (m *model) renderChip(k string, v string, focused bool, _ palette) string {
 	raw := fmt.Sprintf("[%s:%s]", k, v)
 	if m.plain {
 		return raw
 	}
-	theme := m.themes[m.themeIndex]
+	// Avoid nested ANSI resets inside the full-line bar style; use subtle text markers.
 	if focused {
-		bgHex := strings.TrimSpace(theme.Colors["accent"])
-		if bgHex == "" {
-			bgHex = strings.TrimSpace(theme.Colors["panel"])
-		}
-		fgHex := readableTextHex(bgHex)
-		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
-			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, raw)
-			}
-		}
-		return m.colorizeBg(raw, p.Warn, p.BgAccent)
+		return "{" + k + ":" + v + "}"
 	}
-	fgHex := strings.TrimSpace(theme.Colors["text"])
-	bgHex := strings.TrimSpace(theme.Colors["background"])
-	if fgHex != "" && bgHex != "" && hasReadableContrast(bgHex, fgHex) {
-		return m.paintHex(raw, fgHex)
-	}
-	return m.colorize(raw, p.Muted)
+	return raw
 }
 
 func (m *model) editPrompt() string {
@@ -1630,14 +1615,27 @@ func (m *model) paintAccent(s string, code int) string {
 	return m.colorize(s, code)
 }
 
-func (m *model) paintBanner(s string, p palette) string {
+func (m *model) paintBanner(s string, cols int, p palette) string {
+	line := fitLine(s, cols)
+	if m.plain {
+		return line
+	}
 	if strings.TrimSpace(m.scopeColor) != "" {
-		return m.paintHex(s, m.scopeColor)
+		theme := m.themes[m.themeIndex]
+		bgHex := strings.TrimSpace(theme.Colors["panel"])
+		if bgHex == "" {
+			bgHex = strings.TrimSpace(theme.Colors["background"])
+		}
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(strings.TrimSpace(m.scopeColor)); ok {
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+			}
+		}
 	}
-	if p.BgAccent > 0 && !m.plain {
-		return m.colorizeBg(s, p.Accent, p.BgAccent)
+	if p.BgAccent > 0 {
+		return fmt.Sprintf("\x1b[38;5;%d;48;5;%dm%s\x1b[K\x1b[0m", p.Accent, p.BgAccent, line)
 	}
-	return m.paintAccent(s, p.Accent)
+	return m.paintAccent(line, p.Accent)
 }
 
 func (m *model) paintTitleBar(s string, cols int, p palette) string {
