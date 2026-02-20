@@ -174,9 +174,15 @@ func TestFilterFocusTabMoves(t *testing.T) {
 	if m.filterFocus == start {
 		t.Fatalf("expected tab to advance filter focus")
 	}
+	if !m.editFilter {
+		t.Fatalf("expected tab to open focused filter editor")
+	}
 	m.handleKey("shift_tab")
 	if m.filterFocus != start {
 		t.Fatalf("expected shift_tab to restore filter focus")
+	}
+	if !m.editFilter {
+		t.Fatalf("expected shift_tab to keep editor active")
 	}
 }
 
@@ -187,8 +193,20 @@ func TestFooterHotkeysAlwaysRendered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, "keys: arrows") {
+	if !strings.Contains(rendered, "keys: arrows move") {
 		t.Fatalf("expected footer hotkey hint line in rendered output")
+	}
+}
+
+func TestScopeChipHiddenWhenUnscoped(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	rendered, err := m.render(120, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rendered, "[scope:all]") {
+		t.Fatalf("scope chip should be hidden when unscoped")
 	}
 }
 

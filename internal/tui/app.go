@@ -220,6 +220,17 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 
 func (m *model) handleKey(key string) bool {
 	if m.editFilter {
+		if key == "tab" || key == "shift_tab" {
+			m.editFilter = false
+			m.dropdownOpen = false
+			if key == "tab" {
+				m.filterFocus = m.nextFilterFocus(1)
+			} else {
+				m.filterFocus = m.nextFilterFocus(-1)
+			}
+			m.beginFilterEdit(m.filterFocus)
+			return false
+		}
 		m.handleFilterEdit(key)
 		return false
 	}
@@ -228,9 +239,11 @@ func (m *model) handleKey(key string) bool {
 	case "q":
 		return true
 	case "tab":
-		m.filterFocus = (m.filterFocus + 1) % filterFieldCount
+		m.filterFocus = m.nextFilterFocus(1)
+		m.beginFilterEdit(m.filterFocus)
 	case "shift_tab":
-		m.filterFocus = (m.filterFocus + filterFieldCount - 1) % filterFieldCount
+		m.filterFocus = m.nextFilterFocus(-1)
+		m.beginFilterEdit(m.filterFocus)
 	case "up":
 		m.selected--
 	case "down":
@@ -255,8 +268,6 @@ func (m *model) handleKey(key string) bool {
 	case "a":
 		m.filterFocus = filterFieldAssignee
 		m.beginFilterEdit(filterFieldAssignee)
-	case "m":
-		m.filters.TodayMode = cycle([]string{"mine", "all"}, m.filters.TodayMode)
 	case "s":
 		m.filters.Status = cycle([]string{"open", "all", "completed", "archived"}, m.filters.Status)
 		m.selected = 0
@@ -288,6 +299,29 @@ func (m *model) handleKey(key string) bool {
 		m.selected = 0
 	}
 	return false
+}
+
+func (m *model) nextFilterFocus(delta int) int {
+	fields := []int{filterFieldText, filterFieldStatus, filterFieldPriority, filterFieldTags, filterFieldAssignee}
+	if m.view == "today" {
+		fields = append(fields, filterFieldTodayMode)
+	}
+	if len(fields) == 0 {
+		return filterFieldText
+	}
+	idx := 0
+	for i, f := range fields {
+		if f == m.filterFocus {
+			idx = i
+			break
+		}
+	}
+	next := idx + delta
+	for next < 0 {
+		next += len(fields)
+	}
+	next = next % len(fields)
+	return fields[next]
 }
 
 func (m *model) beginFilterEdit(field int) {
@@ -589,7 +623,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 		bodyBudget = 4
 	}
 
-	scope := "all"
+	scope := ""
 	if m.filters.ScopeKind != "" {
 		scope = m.filters.ScopeKind + ":" + m.filters.ScopeName
 	}
@@ -625,7 +659,11 @@ func (m *model) render(cols int, lines int) (string, error) {
 	} else {
 		frame = append(frame, m.paintFooterLine(selectedLine, cols, p))
 	}
-	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text (#[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue), g tags, a assignee, m today-mode, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
+	if m.editFilter {
+		frame = append(frame, m.paintFooterLine("filter tokens: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue | Enter select/add | Esc close", cols, p))
+	} else {
+		frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab filter, / text, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
+	}
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -1363,7 +1401,9 @@ func (m *model) renderFilterBar(scope string, cols int) string {
 		m.renderChip("sort", m.filters.Sort, false, p),
 		m.renderChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter, p),
 		m.renderChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter, p),
-		m.renderChip("scope", scope, false, p),
+	}
+	if strings.TrimSpace(scope) != "" {
+		parts = append(parts, m.renderChip("scope", scope, false, p))
 	}
 	if m.view == "today" {
 		parts = append(parts, m.renderChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && !m.editFilter, p))
@@ -1429,7 +1469,7 @@ func (m *model) editPrompt() string {
 	field := []string{"text", "status", "priority", "tags", "assignee", "today"}[m.editField]
 	switch m.editField {
 	case filterFieldTags:
-		return fmt.Sprintf("edit %s: %s | input=%s (Enter add, Backspace remove last, Esc done)", field, strings.Join(m.fieldDraftTags, ","), m.fieldInput)
+		return fmt.Sprintf("edit %s: %s | input=%s (Enter selects highlighted, Backspace removes last when input empty, Esc done)", field, strings.Join(m.fieldDraftTags, ","), m.fieldInput)
 	case filterFieldAssignee:
 		return fmt.Sprintf("edit %s: %s (Enter select, Esc done)", field, m.fieldInput)
 	case filterFieldStatus:
@@ -1448,8 +1488,26 @@ func (m *model) renderDropdown(cols int, p palette) []string {
 	if max <= 0 {
 		return nil
 	}
-	out := make([]string, 0, max)
-	for i := 0; i < len(m.dropdown) && i < max; i++ {
+	out := make([]string, 0, max+2)
+	total := len(m.dropdown)
+	if total == 0 {
+		return out
+	}
+	start := 0
+	if m.dropdownIndex >= max {
+		start = m.dropdownIndex - max + 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + max
+	if end > total {
+		end = total
+	}
+	if start > 0 {
+		out = append(out, m.paintMuted(clampLine("  ↑ more", cols), p))
+	}
+	for i := start; i < end; i++ {
 		prefix := "  "
 		if i == m.dropdownIndex {
 			prefix = "> "
@@ -1461,6 +1519,9 @@ func (m *model) renderDropdown(cols int, p palette) []string {
 			line = m.paintMuted(line, p)
 		}
 		out = append(out, clampLine(line, cols))
+	}
+	if end < total {
+		out = append(out, m.paintMuted(clampLine("  ↓ more", cols), p))
 	}
 	return out
 }
