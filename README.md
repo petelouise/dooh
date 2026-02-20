@@ -179,11 +179,12 @@ TUI controls:
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
 - `Tab` / `Shift+Tab`: move focus between filter fields
-- `f`: edit text filter
+- `f`: edit text filter (supports quick tokens: `#tag`, `~area`, `^goal`, `@assignee`, `!overdue`)
 - `g`: edit tags filter (typeahead + counts, multi-tag AND)
 - `a`: edit assignee filter (typeahead + counts)
 - `s`: cycle status filter
 - `p`: cycle priority filter
+- `o`: cycle sort (`updated`, `priority`, `scheduled`)
 - `m`: toggle Today mode (`mine` / `all`) in Today view
 - `t`: randomize theme
 - `1`: task list view
@@ -191,7 +192,7 @@ TUI controls:
 - `3`: goal progress view
 - `4`: today view (tasks scheduled today)
 - `5`: assignee progress view
-- `c`: clear all filters back to defaults (`status=open`, `priority=all`, empty text)
+- `c`: clear all filters back to defaults (`status=open`, `priority=all`, `sort=updated`, empty text)
 - `q`: quit
 
 View headers are context-aware:

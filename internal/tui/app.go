@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,7 @@ type FilterState struct {
 	Text      string
 	Status    string
 	Priority  string
+	Sort      string
 	Tags      []string
 	Assignee  string
 	ScopeKind string
@@ -203,6 +205,7 @@ func newModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter str
 			Text:      strings.TrimSpace(filter),
 			Status:    "open",
 			Priority:  "all",
+			Sort:      "updated",
 			TodayMode: "mine",
 		},
 		limit:           limit,
@@ -260,6 +263,10 @@ func (m *model) handleKey(key string) bool {
 		m.expandedID = ""
 	case "p":
 		m.filters.Priority = cycle([]string{"all", "now", "soon", "later"}, m.filters.Priority)
+		m.selected = 0
+		m.expandedID = ""
+	case "o":
+		m.filters.Sort = cycle([]string{"updated", "priority", "scheduled"}, m.filters.Sort)
 		m.selected = 0
 		m.expandedID = ""
 	case "c":
@@ -507,6 +514,7 @@ func (m *model) clearFiltersAndScope() {
 	m.fieldInput = ""
 	m.filters.Status = "open"
 	m.filters.Priority = "all"
+	m.filters.Sort = "updated"
 	m.filters.Tags = nil
 	m.filters.Assignee = ""
 	m.filters.ScopeKind = ""
@@ -617,7 +625,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 	} else {
 		frame = append(frame, m.paintFooterLine(selectedLine, cols, p))
 	}
-	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text, g tags, a assignee, m today-mode, s status, p priority, c clear, t theme, 1-5 views, q quit", cols, p))
+	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text (#tag ~area ^goal @assignee !overdue), g tags, a assignee, m today-mode, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -1028,7 +1036,11 @@ func (m *model) activeFilter() string {
 }
 
 func (m *model) applyFilters(in []row) []row {
-	f := strings.ToLower(m.activeFilter())
+	qf := parseQuickFilter(m.activeFilter())
+	f := strings.ToLower(strings.TrimSpace(qf.Text))
+	requiredTags := append([]string{}, m.filters.Tags...)
+	requiredTags = append(requiredTags, qf.Tags...)
+	now := time.Now()
 	out := make([]row, 0, len(in))
 	for _, r := range in {
 		if m.filters.Status != "all" && r.Status != m.filters.Status {
@@ -1037,9 +1049,9 @@ func (m *model) applyFilters(in []row) []row {
 		if m.filters.Priority != "all" && r.Priority != m.filters.Priority {
 			continue
 		}
-		if len(m.filters.Tags) > 0 {
+		if len(requiredTags) > 0 {
 			rowTags := splitCSVLower(r.Tags)
-			if !containsAllTags(rowTags, m.filters.Tags) {
+			if !containsAllTags(rowTags, requiredTags) {
 				continue
 			}
 		}
@@ -1055,6 +1067,18 @@ func (m *model) applyFilters(in []row) []row {
 		if m.filters.ScopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.filters.ScopeID) {
 			continue
 		}
+		if len(qf.Areas) > 0 && !matchesAllInCSV(r.Areas, qf.Areas) {
+			continue
+		}
+		if len(qf.Goals) > 0 && !matchesAllInCSV(r.Goals, qf.Goals) {
+			continue
+		}
+		if len(qf.Assignees) > 0 && !matchesAllInCSV(r.Assignees, qf.Assignees) {
+			continue
+		}
+		if qf.Overdue && !isOverdue(r, now, m.loc) {
+			continue
+		}
 		if f != "" {
 			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Priority, r.Collection, r.Tags, r.Assignees}, " "))
 			if !fuzzyMatch(h, f) {
@@ -1063,11 +1087,12 @@ func (m *model) applyFilters(in []row) []row {
 		}
 		out = append(out, r)
 	}
+	sortRows(out, m.filters.Sort, m.loc)
 	return out
 }
 
 func (m *model) applyProgressFilter(in []progressRow) []progressRow {
-	f := strings.ToLower(m.activeFilter())
+	f := strings.ToLower(parseQuickFilter(m.activeFilter()).Text)
 	if f == "" {
 		return in
 	}
@@ -1276,10 +1301,29 @@ func fallbackDash(v string) string {
 
 func (m *model) renderFilterBar(scope string, cols int) string {
 	p := paletteForTheme(m.themes[m.themeIndex].ID)
+	qf := parseQuickFilter(m.activeFilter())
+	quickTokens := make([]string, 0, 6)
+	for _, t := range qf.Tags {
+		quickTokens = append(quickTokens, "#"+t)
+	}
+	for _, a := range qf.Areas {
+		quickTokens = append(quickTokens, "~"+a)
+	}
+	for _, g := range qf.Goals {
+		quickTokens = append(quickTokens, "^"+g)
+	}
+	for _, a := range qf.Assignees {
+		quickTokens = append(quickTokens, "@"+a)
+	}
+	if qf.Overdue {
+		quickTokens = append(quickTokens, "!overdue")
+	}
 	parts := []string{
-		m.renderChip("text", fallbackDash(m.activeFilter()), m.filterFocus == filterFieldText && !m.editFilter, p),
+		m.renderChip("text", fallbackDash(qf.Text), m.filterFocus == filterFieldText && !m.editFilter, p),
+		m.renderChip("quick", fallbackDash(strings.Join(quickTokens, " ")), false, p),
 		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter, p),
 		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter, p),
+		m.renderChip("sort", m.filters.Sort, false, p),
 		m.renderChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter, p),
 		m.renderChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter, p),
 		m.renderChip("scope", scope, false, p),
@@ -1455,6 +1499,10 @@ func containsExact(list []string, want string) bool {
 }
 
 func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
+	qf := parseQuickFilter(m.filters.Text)
+	requiredTags := append([]string{}, m.filters.Tags...)
+	requiredTags = append(requiredTags, qf.Tags...)
+	now := time.Now()
 	out := make([]row, 0, len(in))
 	for _, r := range in {
 		if excludeField != filterFieldStatus && m.filters.Status != "all" && r.Status != m.filters.Status {
@@ -1463,9 +1511,9 @@ func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
 		if excludeField != filterFieldPriority && m.filters.Priority != "all" && r.Priority != m.filters.Priority {
 			continue
 		}
-		if excludeField != filterFieldTags && len(m.filters.Tags) > 0 {
+		if excludeField != filterFieldTags && len(requiredTags) > 0 {
 			rowTags := splitCSVLower(r.Tags)
-			if !containsAllTags(rowTags, m.filters.Tags) {
+			if !containsAllTags(rowTags, requiredTags) {
 				continue
 			}
 		}
@@ -1481,15 +1529,202 @@ func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
 		if m.filters.ScopeKind == "assignee" && !containsToken(r.AssigneeIDs, m.filters.ScopeID) {
 			continue
 		}
-		if excludeField != filterFieldText && m.filters.Text != "" {
-			h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Priority, r.Collection, r.Tags, r.Assignees}, " "))
-			if !fuzzyMatch(h, strings.ToLower(m.filters.Text)) {
+		if excludeField != filterFieldText {
+			if len(qf.Areas) > 0 && !matchesAllInCSV(r.Areas, qf.Areas) {
 				continue
+			}
+			if len(qf.Goals) > 0 && !matchesAllInCSV(r.Goals, qf.Goals) {
+				continue
+			}
+			if len(qf.Assignees) > 0 && !matchesAllInCSV(r.Assignees, qf.Assignees) {
+				continue
+			}
+			if qf.Overdue && !isOverdue(r, now, m.loc) {
+				continue
+			}
+		}
+		if excludeField != filterFieldText && m.filters.Text != "" {
+			if strings.TrimSpace(qf.Text) != "" {
+				h := strings.ToLower(strings.Join([]string{r.Title, r.ID, r.Priority, r.Collection, r.Tags, r.Assignees}, " "))
+				if !fuzzyMatch(h, strings.ToLower(qf.Text)) {
+					continue
+				}
 			}
 		}
 		out = append(out, r)
 	}
 	return out
+}
+
+type quickFilter struct {
+	Text      string
+	Tags      []string
+	Areas     []string
+	Goals     []string
+	Assignees []string
+	Overdue   bool
+}
+
+func parseQuickFilter(input string) quickFilter {
+	rawTokens := splitFilterTokens(input)
+	q := quickFilter{}
+	textTerms := make([]string, 0, len(rawTokens))
+	for _, tok := range rawTokens {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		switch {
+		case strings.EqualFold(tok, "!overdue"):
+			q.Overdue = true
+		case strings.HasPrefix(tok, "#"):
+			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Tags, v) {
+				q.Tags = append(q.Tags, v)
+			}
+		case strings.HasPrefix(tok, "~"):
+			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Areas, v) {
+				q.Areas = append(q.Areas, v)
+			}
+		case strings.HasPrefix(tok, "^"):
+			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Goals, v) {
+				q.Goals = append(q.Goals, v)
+			}
+		case strings.HasPrefix(tok, "@"):
+			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Assignees, v) {
+				q.Assignees = append(q.Assignees, v)
+			}
+		default:
+			textTerms = append(textTerms, tok)
+		}
+	}
+	q.Text = strings.TrimSpace(strings.Join(textTerms, " "))
+	return q
+}
+
+func normalizeQuickToken(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.Trim(v, "\"")
+	return strings.TrimSpace(v)
+}
+
+func splitFilterTokens(input string) []string {
+	in := strings.TrimSpace(input)
+	if in == "" {
+		return nil
+	}
+	var out []string
+	var b strings.Builder
+	inQuote := false
+	for _, r := range in {
+		switch r {
+		case '"':
+			inQuote = !inQuote
+			b.WriteRune(r)
+		case ' ', '\t':
+			if inQuote {
+				b.WriteRune(r)
+				continue
+			}
+			if b.Len() > 0 {
+				out = append(out, b.String())
+				b.Reset()
+			}
+		default:
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() > 0 {
+		out = append(out, b.String())
+	}
+	return out
+}
+
+func matchesAllInCSV(csv string, wants []string) bool {
+	values := splitCSV(csv)
+	if len(values) == 0 {
+		return false
+	}
+	for _, want := range wants {
+		want = strings.ToLower(strings.TrimSpace(want))
+		if want == "" {
+			continue
+		}
+		match := false
+		for _, v := range values {
+			lv := strings.ToLower(strings.TrimSpace(v))
+			if fuzzyMatch(lv, want) || strings.Contains(lv, want) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	return true
+}
+
+func sortRows(rows []row, mode string, loc *time.Location) {
+	switch strings.TrimSpace(mode) {
+	case "priority":
+		sort.SliceStable(rows, func(i, j int) bool {
+			pi := priorityRank(rows[i].Priority)
+			pj := priorityRank(rows[j].Priority)
+			if pi != pj {
+				return pi < pj
+			}
+			return updatedUnix(rows[i].UpdatedAt, loc) > updatedUnix(rows[j].UpdatedAt, loc)
+		})
+	case "scheduled":
+		sort.SliceStable(rows, func(i, j int) bool {
+			si, siOK := scheduledUnix(rows[i].Scheduled, loc)
+			sj, sjOK := scheduledUnix(rows[j].Scheduled, loc)
+			if siOK != sjOK {
+				return siOK
+			}
+			if si != sj {
+				return si < sj
+			}
+			return updatedUnix(rows[i].UpdatedAt, loc) > updatedUnix(rows[j].UpdatedAt, loc)
+		})
+	default:
+		// Default DB order is updated_at DESC.
+	}
+}
+
+func priorityRank(v string) int {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "now":
+		return 0
+	case "soon":
+		return 1
+	case "later":
+		return 2
+	default:
+		return 99
+	}
+}
+
+func updatedUnix(ts string, loc *time.Location) int64 {
+	t, ok := parseTime(ts)
+	if !ok {
+		return 0
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	return t.In(loc).Unix()
+}
+
+func scheduledUnix(ts string, loc *time.Location) (int64, bool) {
+	t, ok := parseTime(ts)
+	if !ok {
+		return 0, false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	return t.In(loc).Unix(), true
 }
 
 func assigneeInitials(names string) string {

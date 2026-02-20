@@ -208,6 +208,76 @@ func TestEnterOnProjectViewDrillsToScopedTasks(t *testing.T) {
 	}
 }
 
+func TestQuickFilterTokens(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Text = "#Bugs @Human"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row for #Bugs @Human, got %d", len(rows))
+	}
+	if rows[0].Title != "Critical fix title" {
+		t.Fatalf("unexpected row: %s", rows[0].Title)
+	}
+}
+
+func TestQuickFilterOverdueToken(t *testing.T) {
+	sqlite := newTUIDB(t)
+	now := time.Now().UTC()
+	overdueDue := now.Add(-48 * time.Hour).Format(time.RFC3339)
+	mustExec(t, sqlite, "UPDATE tasks SET due_at="+db.Quote(overdueDue)+" WHERE id='1';")
+	m := testModel(sqlite)
+	if !parseQuickFilter("!overdue").Overdue {
+		t.Fatalf("expected !overdue token to parse as overdue")
+	}
+	m.filters.Text = "!overdue"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected overdue rows")
+	}
+	for _, r := range rows {
+		if !isOverdue(r, time.Now(), time.UTC) {
+			t.Fatalf("unexpected non-overdue row in !overdue result: %s", r.Title)
+		}
+	}
+}
+
+func TestSortPriorityAndScheduled(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Sort = "priority"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("expected at least 2 rows")
+	}
+	if rows[0].Priority != "now" {
+		t.Fatalf("expected priority sort to place now first, got %s", rows[0].Priority)
+	}
+
+	m.filters.Sort = "scheduled"
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("expected at least 2 rows")
+	}
+	firstScheduled, _ := parseTime(rows[0].Scheduled)
+	secondScheduled, _ := parseTime(rows[1].Scheduled)
+	if firstScheduled.After(secondScheduled) {
+		t.Fatalf("expected scheduled sort ascending, got %s then %s", rows[0].Scheduled, rows[1].Scheduled)
+	}
+}
+
 func newTUIDB(t *testing.T) db.SQLite {
 	t.Helper()
 	if _, err := exec.LookPath("sqlite3"); err != nil {
@@ -258,10 +328,14 @@ CREATE TABLE collections(
 	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c1','c_P1','Project Atlas','project','#7AB8FF',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c2','c_T1','Bugs','tag','#FF9AA2',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c3','c_T2','Deep Work','tag','#A2D2FF',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c4','c_G1','Weekly Goal','goal','#98B6FF',"+db.Quote(updated)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c5','c_A1','Home Ops','area','#A3D9A5',"+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('1','t_AAAAAA','Critical fix title','open','now',"+db.Quote(due)+","+db.Quote(scheduled)+","+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('2','t_BBBBBB','Write deep focus memo','open','soon',"+db.Quote(due)+","+db.Quote(now.Format(time.RFC3339))+","+db.Quote(updated)+");")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c1');")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c2');")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c4');")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('1','c5');")
 	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('2','c3');")
 	mustExec(t, sqlite, "INSERT INTO task_assignees(task_id,user_id) VALUES('1','u1');")
 	mustExec(t, sqlite, "INSERT INTO task_assignees(task_id,user_id) VALUES('2','u2');")
