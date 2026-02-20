@@ -201,7 +201,7 @@ func TestFooterHotkeysAlwaysRendered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, "keys: arrows move") {
+	if !strings.Contains(rendered, "keys:") {
 		t.Fatalf("expected footer hotkey hint line in rendered output")
 	}
 }
@@ -476,8 +476,27 @@ func TestNoQuickChipOrCurlyBracesInFilterBar(t *testing.T) {
 	if strings.Contains(rendered, "{") || strings.Contains(rendered, "}") {
 		t.Fatalf("curly braces should not be used for chip focus")
 	}
+	if strings.Contains(rendered, "FILTERS(status=open|all|completed|archived)") {
+		t.Fatalf("status legend should not be embedded in filter bar title")
+	}
 	if !strings.Contains(rendered, "*[") {
 		t.Fatalf("expected focused chip marker in plain mode after tab")
+	}
+}
+
+func TestPriorityEditorKeepsDropdownHighlightInSync(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filterFocus = filterFieldPriority
+	m.filterBarFocus = true
+	m.handleKey("enter")
+	if !m.editFilter {
+		t.Fatalf("expected priority editor to open")
+	}
+	before := m.dropdownIndex
+	m.handleKey("down")
+	if m.dropdownIndex == before {
+		t.Fatalf("expected dropdown highlight index to move with priority cycle")
 	}
 }
 

@@ -449,6 +449,7 @@ func (m *model) handleFilterEdit(key string) {
 			m.editFilter = false
 		case "up", "down":
 			m.filters.Status = cycle([]string{"open", "all", "completed", "archived"}, m.filters.Status)
+			m.syncDropdownSelection()
 		}
 	case filterFieldPriority:
 		switch key {
@@ -456,6 +457,7 @@ func (m *model) handleFilterEdit(key string) {
 			m.editFilter = false
 		case "up", "down":
 			m.filters.Priority = cycle([]string{"all", "now", "soon", "later"}, m.filters.Priority)
+			m.syncDropdownSelection()
 		}
 	case filterFieldTodayMode:
 		switch key {
@@ -463,6 +465,7 @@ func (m *model) handleFilterEdit(key string) {
 			m.editFilter = false
 		case "up", "down":
 			m.filters.TodayMode = cycle([]string{"mine", "all"}, m.filters.TodayMode)
+			m.syncDropdownSelection()
 		}
 	}
 }
@@ -510,6 +513,30 @@ func (m *model) updateFacetOptions(field int) {
 	m.dropdownOpen = len(filtered) > 0
 	if m.dropdownIndex >= len(filtered) {
 		m.dropdownIndex = 0
+	}
+	m.syncDropdownSelection()
+}
+
+func (m *model) syncDropdownSelection() {
+	if !m.editFilter || len(m.dropdown) == 0 {
+		return
+	}
+	var current string
+	switch m.editField {
+	case filterFieldStatus:
+		current = m.filters.Status
+	case filterFieldPriority:
+		current = m.filters.Priority
+	case filterFieldTodayMode:
+		current = m.filters.TodayMode
+	default:
+		return
+	}
+	for i, opt := range m.dropdown {
+		if strings.EqualFold(strings.TrimSpace(opt.Name), strings.TrimSpace(current)) {
+			m.dropdownIndex = i
+			return
+		}
 	}
 }
 
@@ -692,7 +719,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 		if m.filterBarFocus {
 			frame = append(frame, m.paintFooterLine("filter focus: Tab next, Shift+Tab prev, Enter edit, Esc close | tokens: #[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue", cols, p))
 		} else {
-			frame = append(frame, m.paintFooterLine("keys: arrows move, Enter action, Tab focus, / text, s status, p priority, o sort, O reverse", cols, p))
+			frame = append(frame, m.paintFooterLine("keys: arrows Enter Tab / s p o O c t 1-5 q", cols, p))
 		}
 	}
 
@@ -1405,8 +1432,6 @@ func (m *model) renderFilterBar(scope string, cols int) string {
 		m.renderChip("text", textDisplay, m.filterFocus == filterFieldText && m.filterBarFocus && !m.editFilter, p),
 		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && m.filterBarFocus && !m.editFilter, p),
 		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && m.filterBarFocus && !m.editFilter, p),
-		m.renderChip("sort", m.filters.Sort, false, p),
-		m.renderChip("order", normalizeSortDirection(m.filters.SortDir), false, p),
 		m.renderChip("tags", tagsDisplay, m.filterFocus == filterFieldTags && m.filterBarFocus && !m.editFilter, p),
 		m.renderChip("assignee", assigneeDisplay, m.filterFocus == filterFieldAssignee && m.filterBarFocus && !m.editFilter, p),
 	}
@@ -1416,7 +1441,9 @@ func (m *model) renderFilterBar(scope string, cols int) string {
 	if m.view == "today" {
 		parts = append(parts, m.renderChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && m.filterBarFocus && !m.editFilter, p))
 	}
-	line := "FILTERS(status=open|all|completed|archived)  " + strings.Join(parts, " ")
+	parts = append(parts, m.renderChip("sort", m.filters.Sort, false, p))
+	parts = append(parts, m.renderChip("order", normalizeSortDirection(m.filters.SortDir), false, p))
+	line := "FILTERS  " + strings.Join(parts, " ")
 	return clampLine(line, cols)
 }
 
@@ -1636,11 +1663,29 @@ func (m *model) computeFacetOptions(field int) ([]FacetOption, error) {
 		}
 		return mapToFacetOptions(counts), nil
 	case filterFieldStatus:
-		return []FacetOption{{Name: "open"}, {Name: "all"}, {Name: "completed"}, {Name: "archived"}}, nil
+		counts := map[string]int{"all": len(filtered)}
+		for _, r := range filtered {
+			counts[r.Status]++
+		}
+		return []FacetOption{
+			{Name: "open", Count: counts["open"]},
+			{Name: "all", Count: counts["all"]},
+			{Name: "completed", Count: counts["completed"]},
+			{Name: "archived", Count: counts["archived"]},
+		}, nil
 	case filterFieldPriority:
-		return []FacetOption{{Name: "all"}, {Name: "now"}, {Name: "soon"}, {Name: "later"}}, nil
+		counts := map[string]int{"all": len(filtered)}
+		for _, r := range filtered {
+			counts[r.Priority]++
+		}
+		return []FacetOption{
+			{Name: "all", Count: counts["all"]},
+			{Name: "now", Count: counts["now"]},
+			{Name: "soon", Count: counts["soon"]},
+			{Name: "later", Count: counts["later"]},
+		}, nil
 	case filterFieldTodayMode:
-		return []FacetOption{{Name: "mine"}, {Name: "all"}}, nil
+		return []FacetOption{{Name: "mine", Count: 0}, {Name: "all", Count: 0}}, nil
 	default:
 		return nil, nil
 	}
