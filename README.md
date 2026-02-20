@@ -19,23 +19,29 @@ GOCACHE=$(pwd)/.cache/go-build go build ./cmd/dooh
 export GOCACHE="$(pwd)/.cache/go-build"
 ```
 
-## Streamlined quick start
+## First-time setup (real-world)
 ```bash
 # install once (recommended for normal use)
 go build -o ~/.local/bin/dooh ./cmd/dooh
 
-# one command bootstrap: db + seed + human/ai demo keys in profile auth store
+# bootstrap local demo workspace (db + users + keys + sample tasks)
 dooh setup demo --db ./dooh.db
 
-# optional local overrides (persisted)
+# set persistent local defaults (no repeated flags needed)
 dooh context set --profile human --db ./dooh.db --theme paper-fruit
 
-# run directly (no repeated --db/--profile required after context setup)
+# verify identity + open TUI
 dooh whoami
 dooh tui
 ```
 
-## Manual quick start
+What setup demo does:
+- initializes schema in your database,
+- seeds one human user and one ai user,
+- creates profile-scoped stored keys under `~/.config/dooh/auth`,
+- creates sample collections/tasks for immediate CLI/TUI testing.
+
+## Manual first-time setup (without `setup demo`)
 ```bash
 # 1) initialize database
 dooh db init --db ./dooh.db
@@ -47,15 +53,48 @@ dooh user create --db ./dooh.db --name Human --bootstrap
 HUMAN_ID=$(sqlite3 -noheader ./dooh.db "select id from users limit 1;")
 dooh key create --db ./dooh.db --user "$HUMAN_ID" --client-type human_cli --scopes "tasks:read,tasks:write,tasks:delete,collections:read,collections:write,export:run,users:admin,keys:admin,system:rollback" --bootstrap
 
-# 4) use printed api_key for writes (or store once via login command)
-export DOOH_MODE=human
-dooh task add --db ./dooh.db --api-key "<PASTE_KEY>" --title "Ship MVP" --priority now
-dooh collection add --db ./dooh.db --api-key "<PASTE_KEY>" --name "Project Alpha" --kind project
+# 4) login once to store the key for your profile
+dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
 
-# 5) list + export
-dooh task list --db ./dooh.db --api-key "<PASTE_KEY>"
-dooh collection list --db ./dooh.db --api-key "<PASTE_KEY>"
-dooh export site --db ./dooh.db --out ./site-data --api-key "<PASTE_KEY>"
+# 5) set defaults so commands are short
+dooh context set --profile human --db ./dooh.db --theme paper-fruit
+
+# 6) use normal commands
+dooh task add --title "Ship MVP" --priority now
+dooh collection add --name "Project Alpha" --kind project
+dooh task list
+dooh collection list
+dooh export site --out ./site-data
+```
+
+## Real-world pair workflow
+
+### Human shell
+```bash
+dooh context set --profile human --db ./dooh.db --theme paper-fruit
+dooh whoami
+dooh task list
+dooh tui
+```
+
+### AI assistant shell (inherits human shell + loads ai `.env`)
+Example `.env` for the ai runtime:
+```bash
+DOOH_AI_KEY=<AI_KEY>
+```
+
+Expected behavior with ai `.env` loaded:
+- actor resolves to ai from key type,
+- profile auto-forces to `ai` unless `--profile` is explicitly set,
+- no repeated `DOOH_MODE` needed,
+- all writes are attributed to ai user/key in events.
+
+AI usage:
+```bash
+dooh whoami
+dooh task add --title "Draft release checklist" --priority soon
+dooh task assign add --id t_XXXXXX --user <human_user_id>
+dooh task list
 ```
 
 Relationship commands:
@@ -71,28 +110,52 @@ dooh collection link --parent <collection> --child <collection>
 dooh collection unlink --parent <collection> --child <collection>
 ```
 
-For all data commands (read and write):
-- explicit `--api-key` is enough; actor is inferred from key type.
-- without `--api-key`, mode/key source is resolved from `DOOH_MODE` + stored/env keys.
-- `DOOH_MODE` accepts `human`, `ai`, or legacy `agent`.
-
-Store keys once per profile:
-```bash
-dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
-dooh --profile ai login --db ./dooh.db --api-key "<AI_KEY>"
-```
-
-Inspect or update persisted context:
+Useful identity/context commands:
 ```bash
 dooh context show
 dooh context set --profile ai
 dooh context clear
+dooh whoami
 ```
 
-Inspect current execution identity:
+## Testing checklist
+
+### CLI smoke test
 ```bash
-dooh whoami --api-key "<HUMAN_KEY>"
-DOOH_AI_KEY="<AI_KEY>" dooh whoami
+dooh setup demo --db ./dooh.db
+dooh context set --profile human --db ./dooh.db --theme paper-fruit
+dooh whoami
+dooh task add --title "CLI smoke task" --priority now
+dooh task list
+dooh export site --out ./site-data
+```
+
+### AI smoke test
+```bash
+export DOOH_AI_KEY="<AI_KEY>"
+dooh whoami
+dooh task add --title "AI smoke task" --priority soon
+dooh task list
+```
+
+### TUI smoke test
+```bash
+dooh tui
+dooh tui --static --plain
+```
+
+### Audit verification
+```bash
+sqlite3 ./dooh.db "select seq,event_type,actor_user_id,key_id,client_type,occurred_at from events order by seq desc limit 20;"
+```
+Check that human and ai commands produce expected attribution rows.
+
+### Automated tests
+```bash
+GOCACHE=$(pwd)/.cache/go-build go test ./...
+GOCACHE=$(pwd)/.cache/go-build go test ./internal/cli -run Test
+GOCACHE=$(pwd)/.cache/go-build go test ./internal/tui -run Test
+GOCACHE=$(pwd)/.cache/go-build go test ./... -cover
 ```
 
 ## Fast demo seed + colorful dashboard
@@ -204,6 +267,7 @@ dooh --profile human config show
 - Key `client_type` must be interactive (`human_cli` or `agent_cli`) for runtime commands.
 - profile-scoped keys are written to `~/.config/dooh/auth/<profile>.<actor>.key` with `0600` permissions.
 - user/key lifecycle admin actions are human-only by default; non-human requires system key + `--allow-system-admin`.
+- there is intentionally no user-delete command.
 
 ## Developer-only run mode
 Using `go run` is still supported for development:
