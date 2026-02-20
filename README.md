@@ -3,6 +3,10 @@
 `dooh` expands to "do?, oh!", and is pronounced "duo".
 It's is a local-first task/project/goal manager for a human + ai pair.
 
+Quick links:
+- AI operations guide: `docs/AI_CLI_PLAYBOOK.md`
+- Release and packaging checklist: `docs/RELEASE_CHECKLIST.md`
+
 ## Current status
 Working local MVP includes:
 - sqlite-backed CLI commands (`db`, `user`, `key`, `task`, `collection`, `export`),
@@ -20,6 +24,31 @@ GOCACHE=$(pwd)/.cache/go-build go build ./cmd/dooh
 ```bash
 export GOCACHE="$(pwd)/.cache/go-build"
 ```
+
+## Install and channel split (stable vs dev)
+```bash
+# stable/global binary
+go build -o ~/.local/bin/dooh ./cmd/dooh
+
+# local/dev binary (keeps experiments separate)
+go build -o ~/.local/bin/dooh-dev ./cmd/dooh
+```
+
+Recommended:
+- use `dooh` for day-to-day workflow,
+- use `dooh-dev` for in-progress testing,
+- keep separate DB/config roots when testing dev behavior.
+
+## AI capability boundary
+AI can manage all day-to-day work from CLI:
+- tasks (add/list/complete/reopen/archive/delete),
+- dependencies, subtasks, assignments,
+- collections and collection links,
+- exports.
+
+AI is restricted from human lifecycle admin by default:
+- user/key lifecycle operations require human actor unless explicit system override.
+- deleting human users is unsupported (no `user delete` command).
 
 ## First-time setup (real-world)
 ```bash
@@ -62,8 +91,8 @@ dooh --profile human login --db ./dooh.db --api-key "<HUMAN_KEY>"
 dooh context set --profile human --db ./dooh.db --theme paper-fruit
 
 # 6) use normal commands
-dooh task add --title "Ship MVP" --priority now
-dooh collection add --name "Project Alpha" --kind project
+dooh task add --title "Water fern shelf" --priority now
+dooh collection add --name "Moon Garden" --kind project
 dooh task list
 dooh collection list
 dooh export site --out ./site-data
@@ -94,7 +123,7 @@ Expected behavior with ai `.env` loaded:
 AI usage:
 ```bash
 dooh whoami
-dooh task add --title "Draft release checklist" --priority soon
+dooh task add --title "Sketch owl nest map" --priority soon
 dooh task assign add --id t_XXXXXX --user <human_user_id>
 dooh task list
 ```
@@ -127,7 +156,7 @@ dooh whoami
 dooh setup demo --db ./dooh.db
 dooh context set --profile human --db ./dooh.db --theme paper-fruit
 dooh whoami
-dooh task add --title "CLI smoke task" --priority now
+dooh task add --title "CLI smoke: water basil pot" --priority now
 dooh task list
 dooh export site --out ./site-data
 ```
@@ -136,7 +165,7 @@ dooh export site --out ./site-data
 ```bash
 export DOOH_AI_KEY="<AI_KEY>"
 dooh whoami
-dooh task add --title "AI smoke task" --priority soon
+dooh task add --title "AI smoke: count pond frogs" --priority soon
 dooh task list
 ```
 
@@ -166,7 +195,6 @@ GOCACHE=$(pwd)/.cache/go-build go test ./... -cover
 ```bash
 dooh db init --db ./dooh.db
 dooh demo seed --db ./dooh.db
-export DOOH_MODE=human
 dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12
 dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --static
 dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --plain
@@ -237,7 +265,7 @@ Fallback behavior:
 ```bash
 dooh tui --list-themes
 dooh tui --theme sunset-pop
-dooh tui --theme sunset-pop --filter rollback
+dooh tui --theme sunset-pop --filter "owl"
 ```
 
 ## TUI renderer architecture
@@ -283,7 +311,7 @@ dooh --profile human config show
 ## Auth safety behavior
 - all runtime data commands require authenticated user context (no anonymous mode).
 - explicit `--api-key` takes priority and determines actor from key `client_type`.
-- if no explicit key is provided, auth resolves from `DOOH_MODE` + stored/env keys.
+- if no explicit key is provided, auth resolves from stored/env keys (mode hint optional).
 - `DOOH_MODE` supports `human`, `ai`, and legacy `agent`, but is optional.
 - ai env key (`DOOH_AI_KEY`, or `DOOH_API_KEY` for compatibility) enables zero-touch ai operation.
 - when ai env key is present, profile is auto-forced to `ai` unless `--profile` is explicitly provided.
