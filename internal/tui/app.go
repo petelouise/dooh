@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dooh/internal/db"
+	"github.com/mattn/go-runewidth"
 )
 
 type row struct {
@@ -633,7 +634,14 @@ func (m *model) renderHeader(cols int, p palette) string {
 		if nameW < 18 {
 			nameW = 18
 		}
-		h := fmt.Sprintf("%-2s %-*s  %-18s  %-5s  %-9s  %-9s", "", nameW, "Name", "Progress", "%", "Completed", "Remaining")
+		h := strings.Join([]string{
+			padCell("", 2),
+			padCell("Name", nameW),
+			padCell("Progress", 18),
+			padCell("%", 5),
+			padCell("Completed", 9),
+			padCell("Remaining", 9),
+		}, "  ")
 		return m.paintMuted(clampLine(h, cols), p)
 	}
 	priorityW := 8
@@ -644,7 +652,14 @@ func (m *model) renderHeader(cols int, p palette) string {
 	if titleW < 16 {
 		titleW = 16
 	}
-	h := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s", ">", "S", assigneeW, "Asg", titleW, "Title", priorityW, "Priority", scheduledW, "Scheduled")
+	h := strings.Join([]string{
+		padCell(">", 1),
+		padCell("S", 1),
+		padCell("Asg", assigneeW),
+		padCell("Title", titleW),
+		padCell("Priority", priorityW),
+		padCell("Scheduled", scheduledW),
+	}, "  ")
 	return m.paintMuted(clampLine(h, cols), p)
 }
 
@@ -783,14 +798,14 @@ func (m *model) composeTaskBody(rows []row, budget int, cols int, now time.Time,
 		icon := statusIcon(r.Status)
 		title := r.Title + dueSuffix(r, now, m.loc)
 		asg := assigneeInitials(r.Assignees)
-		rowLine := fmt.Sprintf("%-1s %-1s %-*s  %-*s  %-*s  %-*s",
-			mark,
-			icon,
-			assigneeW, asg,
-			titleW, clampLine(title, titleW),
-			priorityW, r.Priority,
-			scheduledW, NaturalDate(r.Scheduled, m.loc, now),
-		)
+		rowLine := strings.Join([]string{
+			padCell(mark, 1),
+			padCell(icon, 1),
+			padCell(asg, assigneeW),
+			padCell(title, titleW),
+			padCell(r.Priority, priorityW),
+			padCell(NaturalDate(r.Scheduled, m.loc, now), scheduledW),
+		}, "  ")
 		line := clampLine(rowLine, cols)
 		line = m.paintStatusMarker(line, icon, r.Status, p)
 		line = m.paintDueSuffix(line, title, r, now, p)
@@ -862,7 +877,14 @@ func (m *model) composeProgressBody(rows []progressRow, budget int, cols int, p 
 		if strings.TrimSpace(r.ColorHex) != "" {
 			name = m.paintHex(name, r.ColorHex)
 		}
-		line := fmt.Sprintf("%-2s %-*s  %-18s  %3d%%  %9d  %9d", mark, nameW, name, bar, pct(r.Completed, r.Total), r.Completed, r.Remaining)
+		line := strings.Join([]string{
+			padCell(mark, 2),
+			padCell(name, nameW),
+			padCell(bar, 18),
+			padCell(fmt.Sprintf("%3d%%", pct(r.Completed, r.Total)), 5),
+			padCell(fmt.Sprintf("%d", r.Completed), 9),
+			padCell(fmt.Sprintf("%d", r.Remaining), 9),
+		}, "  ")
 		line = clampLine(line, cols)
 		if i == m.selected {
 			line = m.paintSelected(line, p)
@@ -1116,21 +1138,28 @@ func clampLine(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if len(s) <= width {
+	if runewidth.StringWidth(s) <= width {
 		return s
 	}
 	if width <= 3 {
-		return s[:width]
+		return runewidth.Truncate(s, width, "")
 	}
-	return s[:width-3] + "..."
+	return runewidth.Truncate(s, width, "...")
 }
 
 func fitLine(s string, width int) string {
 	s = clampLine(s, width)
-	if len(s) < width {
-		s += strings.Repeat(" ", width-len(s))
+	if w := runewidth.StringWidth(s); w < width {
+		s += strings.Repeat(" ", width-w)
 	}
 	return s
+}
+
+func padCell(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return fitLine(s, width)
 }
 
 func joinFrame(lines []string) string {

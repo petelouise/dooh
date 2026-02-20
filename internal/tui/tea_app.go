@@ -52,14 +52,9 @@ func (m teaProgramModel) View() string {
 	}
 	width := m.width
 	height := m.height
+	// Wait for Bubble Tea's window size so full-width backgrounds are accurate.
 	if width <= 0 || height <= 0 {
-		w, h := terminalSize()
-		if width <= 0 {
-			width = w
-		}
-		if height <= 0 {
-			height = h
-		}
+		return ""
 	}
 	frame, err := m.core.render(width, height)
 	if err != nil {
