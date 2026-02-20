@@ -150,3 +150,11 @@ func TestContextPrecedenceFlagsThenEnvThenContext(t *testing.T) {
 		t.Fatalf("expected flag db override in output, got: %s", out.String())
 	}
 }
+
+func TestUserDeleteCommandIsNotSupported(t *testing.T) {
+	var out bytes.Buffer
+	err := Run([]string{"user", "delete", "--id", "u_h"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "unknown user command") {
+		t.Fatalf("expected user delete to be unsupported, got err=%v out=%s", err, out.String())
+	}
+}

@@ -47,18 +47,18 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 		Kind  string
 		Color string
 	}{
-		{"Atlas Rewrite", "project", "#4D96FF"},
-		{"Ops Automation", "project", "#5AB0FF"},
-		{"Launch Readiness", "project", "#89C2FF"},
-		{"Q1 Reliability Goal", "goal", "#FFD166"},
-		{"Personal Systems Goal", "goal", "#E9C46A"},
-		{"Work Area", "area", "#FF7A59"},
-		{"Home Area", "area", "#F28482"},
-		{"Platform Group", "class", "#70E000"},
-		{"Growth Group", "class", "#80ED99"},
-		{"Deep Work", "tag", "#2EC4B6"},
-		{"Bugs", "tag", "#FF6B6B"},
-		{"Docs", "tag", "#A9DEF9"},
+		{"Moon Garden", "project", "#4D96FF"},
+		{"Pollinator Patio", "project", "#5AB0FF"},
+		{"Forest Sketchbook", "project", "#89C2FF"},
+		{"Native Bloom Goal", "goal", "#FFD166"},
+		{"Cozy Habitat Goal", "goal", "#E9C46A"},
+		{"Greenhouse Corner", "area", "#FF7A59"},
+		{"Backyard Pond", "area", "#F28482"},
+		{"Caretaker Circle", "class", "#70E000"},
+		{"Trail Circle", "class", "#80ED99"},
+		{"Moss", "tag", "#2EC4B6"},
+		{"Birds", "tag", "#FF6B6B"},
+		{"Bees", "tag", "#A9DEF9"},
 	}
 
 	collectionIDs := make([]string, 0, len(collections))
@@ -84,24 +84,24 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 		Assignees  []string
 		Collection []int
 	}{
-		{"Ship profile-aware auth flow", "now", "open", 1, 0, humanID, []string{humanID}, []int{0, 3, 5, 7, 9}},
-		{"Polish TUI dashboard visuals", "soon", "open", 3, 1, agentID, []string{agentID}, []int{0, 3, 7, 9, 11}},
-		{"Archive completed sprint tasks", "later", "completed", -1, -2, humanID, []string{humanID}, []int{1, 4, 5, 8}},
-		{"Refine export metrics schema", "soon", "open", 4, 2, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
-		{"Investigate flaky migration test", "now", "open", 0, 0, humanID, []string{humanID, agentID}, []int{0, 3, 7, 10}},
-		{"Write weekly goals review", "later", "archived", -5, -6, humanID, []string{humanID}, []int{4, 5, 11}},
-		{"Implement dependency cycle guard", "now", "open", 2, 1, agentID, []string{agentID}, []int{0, 3, 7, 10}},
-		{"Tune collection color assignment", "soon", "completed", -2, -3, agentID, []string{agentID}, []int{1, 4, 9}},
-		{"Prepare launch checklist", "later", "open", 7, 5, humanID, []string{humanID, partnerID}, []int{2, 3, 5, 11}},
-		{"Backfill docs for rollback flow", "soon", "open", 5, 3, agentID, []string{agentID}, []int{2, 3, 11}},
-		{"Draft onboarding playbook", "soon", "open", 2, 0, partnerID, []string{partnerID}, []int{2, 4, 8, 11}},
-		{"Fix weekend rollover bug", "now", "open", -2, -1, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
-		{"Home network backup audit", "later", "open", 6, 0, humanID, []string{humanID}, []int{4, 6, 8}},
-		{"Pay quarterly cloud invoices", "later", "completed", -1, -1, humanID, []string{humanID}, []int{5, 8}},
-		{"Review agent prompt safety", "now", "open", 1, 0, humanID, []string{humanID, partnerID}, []int{0, 3, 5, 11}},
-		{"Tag cleanup for old tasks", "soon", "archived", -8, -9, agentID, []string{agentID}, []int{1, 4, 9}},
-		{"Benchmark sqlite lock waits", "soon", "open", 2, 1, agentID, []string{agentID}, []int{1, 3, 7}},
-		{"Create monthly goals template", "later", "open", 8, 4, partnerID, []string{partnerID, humanID}, []int{4, 8, 11}},
+		{"Water balcony tomatoes", "now", "open", 1, 0, humanID, []string{humanID}, []int{0, 3, 5, 7, 9}},
+		{"Sketch fox tracks for journal", "soon", "open", 3, 1, agentID, []string{agentID}, []int{0, 3, 7, 9, 11}},
+		{"Archive finished seed notes", "later", "completed", -1, -2, humanID, []string{humanID}, []int{1, 4, 5, 8}},
+		{"Polish bird-spot export card", "soon", "open", 4, 2, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
+		{"Check pond pump rattle", "now", "open", 0, 0, humanID, []string{humanID, agentID}, []int{0, 3, 7, 10}},
+		{"Archive old bloom wishlist", "later", "archived", -5, -6, humanID, []string{humanID}, []int{4, 5, 11}},
+		{"Guard against vine cycle loops", "now", "open", 2, 1, agentID, []string{agentID}, []int{0, 3, 7, 10}},
+		{"Tune palette for bee tags", "soon", "completed", -2, -3, agentID, []string{agentID}, []int{1, 4, 9}},
+		{"Plan spring bloom census", "later", "open", 7, 5, humanID, []string{humanID, partnerID}, []int{2, 3, 5, 11}},
+		{"Write otter habitat notes", "soon", "open", 5, 3, agentID, []string{agentID}, []int{2, 3, 11}},
+		{"Draft hedgehog care card", "soon", "open", 2, 0, partnerID, []string{partnerID}, []int{2, 4, 8, 11}},
+		{"Fix weekend watering rollover", "now", "open", -2, -1, agentID, []string{agentID, humanID}, []int{1, 3, 7, 10}},
+		{"Audit nest-box checklist", "later", "open", 6, 0, humanID, []string{humanID}, []int{4, 6, 8}},
+		{"Mark compost loop complete", "later", "completed", -1, -1, humanID, []string{humanID}, []int{5, 8}},
+		{"Review squirrel-safe prompts", "now", "open", 1, 0, humanID, []string{humanID, partnerID}, []int{0, 3, 5, 11}},
+		{"Archive old feather labels", "soon", "archived", -8, -9, agentID, []string{agentID}, []int{1, 4, 9}},
+		{"Benchmark watering lock waits", "soon", "open", 2, 1, agentID, []string{agentID}, []int{1, 3, 7}},
+		{"Create monthly bloom template", "later", "open", 8, 4, partnerID, []string{partnerID, humanID}, []int{4, 8, 11}},
 	}
 
 	for _, t := range tasks {
@@ -110,7 +110,7 @@ func Seed(sqlite db.SQLite) (SeedResult, error) {
 		if hasGoalCollection(t.Collection) {
 			// Keep due dates on a minority of goal-linked tasks.
 			titleLower := strings.ToLower(t.Title)
-			if !strings.Contains(titleLower, "checklist") && !strings.Contains(titleLower, "migration") {
+			if !strings.Contains(titleLower, "checklist") && !strings.Contains(titleLower, "census") {
 				due = ""
 			}
 		}
