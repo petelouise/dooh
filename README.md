@@ -28,7 +28,17 @@ export GOCACHE="$(pwd)/.cache/go-build"
 
 ## Install and channel split (stable vs dev)
 ```bash
+# safe default: install dev channel only (does not overwrite stable dooh)
 ./scripts/install/install-local.sh
+
+# explicitly install stable channel
+./scripts/install/install-local.sh --stable
+
+# install both channels from current checkout
+./scripts/install/install-local.sh --all
+
+# optional: install stable from one repo and dev from another
+./scripts/install/install-local.sh --all --stable-src /path/to/stable-repo --dev-src /path/to/dev-repo
 ```
 
 Recommended:

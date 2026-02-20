@@ -6,7 +6,14 @@ Use two channels side-by-side:
 
 ## Install
 ```bash
+# safe default: installs dev channel only
 ./scripts/install/install-local.sh
+
+# install stable explicitly
+./scripts/install/install-local.sh --stable
+
+# install both explicitly
+./scripts/install/install-local.sh --all
 ```
 
 ## Stable channel (real data)
