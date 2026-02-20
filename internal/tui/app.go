@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -590,7 +591,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 	bannerLine := centerText("["+banner+"]", cols)
 
 	frame := make([]string, 0, lines)
-	frame = append(frame, m.paintAccent(clampLine(titleLine, cols), p.Accent))
+	frame = append(frame, m.paintTitleBar(titleLine, cols, p))
 	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), p))
 	frame = append(frame, filterLine)
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
@@ -1124,6 +1125,14 @@ func clampLine(s string, width int) string {
 	return s[:width-3] + "..."
 }
 
+func fitLine(s string, width int) string {
+	s = clampLine(s, width)
+	if len(s) < width {
+		s += strings.Repeat(" ", width-len(s))
+	}
+	return s
+}
+
 func joinFrame(lines []string) string {
 	if len(lines) == 0 {
 		return "\r\n"
@@ -1581,6 +1590,35 @@ func (m *model) paintBanner(s string, p palette) string {
 	return m.paintAccent(s, p.Accent)
 }
 
+func (m *model) paintTitleBar(s string, cols int, p palette) string {
+	line := fitLine(s, cols)
+	if m.plain {
+		return line
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
+	if bgHex == "" {
+		bgHex = strings.TrimSpace(theme.Colors["background"])
+	}
+	fgHex := strings.TrimSpace(theme.Colors["text"])
+	if bgHex != "" {
+		if strings.TrimSpace(fgHex) == "" {
+			fgHex = readableTextHex(bgHex)
+		} else if !hasReadableContrast(bgHex, fgHex) {
+			fgHex = readableTextHex(bgHex)
+		}
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+			}
+		}
+	}
+	if p.BgAccent > 0 {
+		return m.colorizeBg(line, p.Accent, p.BgAccent)
+	}
+	return m.paintAccent(line, p.Accent)
+}
+
 func (m *model) paintMuted(s string, p palette) string {
 	return m.colorize(s, p.Muted)
 }
@@ -1746,6 +1784,44 @@ func parseHexColor(v string) (int, int, int, bool) {
 	g := int((n >> 8) & 0xFF)
 	b := int(n & 0xFF)
 	return r, g, b, true
+}
+
+func relativeLuminance(r, g, b int) float64 {
+	lin := func(c int) float64 {
+		x := float64(c) / 255.0
+		if x <= 0.03928 {
+			return x / 12.92
+		}
+		return math.Pow((x+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
+
+func contrastRatio(bgHex, fgHex string) float64 {
+	r1, g1, b1, ok1 := parseHexColor(bgHex)
+	r2, g2, b2, ok2 := parseHexColor(fgHex)
+	if !ok1 || !ok2 {
+		return 0
+	}
+	l1 := relativeLuminance(r1, g1, b1)
+	l2 := relativeLuminance(r2, g2, b2)
+	if l1 < l2 {
+		l1, l2 = l2, l1
+	}
+	return (l1 + 0.05) / (l2 + 0.05)
+}
+
+func hasReadableContrast(bgHex, fgHex string) bool {
+	return contrastRatio(bgHex, fgHex) >= 4.5
+}
+
+func readableTextHex(bgHex string) string {
+	black := "#111111"
+	white := "#FFFFFF"
+	if contrastRatio(bgHex, black) >= contrastRatio(bgHex, white) {
+		return black
+	}
+	return white
 }
 
 func isTTY() bool {
