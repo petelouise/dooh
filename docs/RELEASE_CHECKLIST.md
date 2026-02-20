@@ -3,42 +3,56 @@
 Use this checklist before cutting each release.
 
 ## 1) Code health
-- `go test ./...` passes.
+- `GOCACHE=$(pwd)/.cache/go-build go test ./...` passes.
 - TUI smoke check completed (`dooh tui`, `dooh tui --plain`, `dooh tui --renderer legacy`).
 - CLI smoke check completed with both human and ai keys.
 
 ## 2) Versioning and changelog
 - Bump version in `internal/cli/cli.go` (`dooh version` output).
-- Add release notes entry in `CHANGELOG.md` (if present).
+- Add release notes entry in `CHANGELOG.md`.
 - Tag release with semantic version (`vX.Y.Z`).
 
-## 3) Build artifacts
-- Build binaries for target platforms.
-- Produce checksums for artifacts.
+## 3) Use release scripts
+- Preflight:
+```bash
+./scripts/release/release-preflight.sh --version vX.Y.Z
+```
+- Build artifacts:
+```bash
+./scripts/release/release-build.sh --version vX.Y.Z
+```
+- Create tag:
+```bash
+./scripts/release/release-tag.sh --version vX.Y.Z
+```
+
+## 4) Build artifacts
+- Confirm binaries exist under `dist/vX.Y.Z/`.
+- Confirm `SHA256SUMS` exists.
 - Attach binaries + checksums to release.
 
-## 4) Install path clarity
+## 5) Install path clarity
 - Stable binary name: `dooh`.
-- Dev binary name: `dooh-dev` (or separate install path).
-- Stable and dev config should not collide:
+- Dev binary name: `dooh-dev`.
+- Stable and dev config must not collide:
   - stable: `~/.config/dooh`
-  - dev: `~/.config/dooh-dev` (or `DOOH_CONFIG_HOME` override)
+  - dev: `~/.config/dooh-dev`
+- Optional override for channel isolation: `DOOH_HOME`.
 
-## 5) Data safety
-- Verify rollback path is documented and tested.
-- Keep release-to-release migration notes.
-- Recommend snapshot before upgrade:
-  - `cp dooh.db dooh.db.bak.<date>`
+## 6) Data safety
+- Stable channel must not use demo seed data.
+- Dev channel may use demo seed data only in isolated db.
+- Snapshot before upgrade:
+  - `cp ~/.local/share/dooh/dooh.db ~/.local/share/dooh/dooh.db.bak.$(date +%Y%m%d-%H%M%S)`
 
-## 6) Auth and audit safety
+## 7) Auth and audit safety
 - Confirm no anonymous runtime access.
 - Confirm ai profile auto-enforcement with `DOOH_AI_KEY`.
 - Confirm lifecycle admin remains human-only by default.
 - Confirm there is still no `user delete` command.
 - Verify events include actor attribution.
 
-## 7) Docs and onboarding
-- README quick start validated copy/paste.
+## 8) Docs and onboarding
+- README quickstart stable/dev validated copy-paste.
 - AI guide updated (`docs/AI_CLI_PLAYBOOK.md`).
-- Example commands match current flags and behavior.
-
+- Channel setup doc updated (`docs/SETUP_CHANNELS.md`).

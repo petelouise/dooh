@@ -6,6 +6,7 @@ It's is a local-first task/project/goal manager for a human + ai pair.
 Quick links:
 - AI operations guide: `docs/AI_CLI_PLAYBOOK.md`
 - Release and packaging checklist: `docs/RELEASE_CHECKLIST.md`
+- Stable/dev channel setup: `docs/SETUP_CHANNELS.md`
 
 ## Current status
 Working local MVP includes:
@@ -27,17 +28,18 @@ export GOCACHE="$(pwd)/.cache/go-build"
 
 ## Install and channel split (stable vs dev)
 ```bash
-# stable/global binary
-go build -o ~/.local/bin/dooh ./cmd/dooh
-
-# local/dev binary (keeps experiments separate)
-go build -o ~/.local/bin/dooh-dev ./cmd/dooh
+./scripts/install/install-local.sh
 ```
 
 Recommended:
 - use `dooh` for day-to-day workflow,
 - use `dooh-dev` for in-progress testing,
 - keep separate DB/config roots when testing dev behavior.
+
+| channel | binary | DOOH_HOME | default db | profile | purpose |
+| --- | --- | --- | --- | --- | --- |
+| stable | `dooh` | `~/.config/dooh` | `~/.local/share/dooh/dooh.db` | `human` | real daily data |
+| dev | `dooh-dev` | `~/.config/dooh-dev` | `~/.local/share/dooh-dev/dooh-dev.db` | `dev` | experiments + demo seed |
 
 ## AI capability boundary
 AI can manage all day-to-day work from CLI:
@@ -50,27 +52,24 @@ AI is restricted from human lifecycle admin by default:
 - user/key lifecycle operations require human actor unless explicit system override.
 - deleting human users is unsupported (no `user delete` command).
 
-## First-time setup (real-world)
+## Quickstart stable (real data, no demo seed)
 ```bash
-# install once (recommended for normal use)
-go build -o ~/.local/bin/dooh ./cmd/dooh
+# bootstrap stable db + users + keys (no fake data)
+./scripts/setup/setup-stable.sh
 
-# bootstrap local demo workspace (db + users + keys + sample tasks)
-dooh setup demo --db ./dooh.db
-
-# set persistent local defaults (no repeated flags needed)
-dooh context set --profile human --db ./dooh.db --theme paper-fruit
-
-# verify identity + open TUI
+# verify identity + start using CLI
 dooh whoami
-dooh tui
+dooh task add --title "Water fern shelf" --priority now
+dooh task list
 ```
 
-What setup demo does:
-- initializes schema in your database,
-- seeds one human user and one ai user,
-- creates profile-scoped stored keys under `~/.config/dooh/auth`,
-- creates sample collections/tasks for immediate CLI/TUI testing.
+## Quickstart dev (isolated demo data)
+```bash
+./scripts/setup/setup-dev.sh
+
+dooh-dev whoami
+dooh-dev task list
+```
 
 ## Manual first-time setup (without `setup demo`)
 ```bash
@@ -96,6 +95,22 @@ dooh collection add --name "Moon Garden" --kind project
 dooh task list
 dooh collection list
 dooh export site --out ./site-data
+```
+
+## AI handoff checklist
+Give the AI these files:
+1. `docs/AI_CLI_PLAYBOOK.md`
+2. `README.md`
+3. `docs/SETUP_CHANNELS.md`
+4. `docs/RELEASE_CHECKLIST.md`
+
+Give the AI this environment contract:
+- `DOOH_AI_KEY=<ai_key>`
+- optional for dev channel: `DOOH_HOME=~/.config/dooh-dev`
+
+Before every run, AI should execute:
+```bash
+dooh whoami
 ```
 
 ## Real-world pair workflow
@@ -153,8 +168,7 @@ dooh whoami
 
 ### CLI smoke test
 ```bash
-dooh setup demo --db ./dooh.db
-dooh context set --profile human --db ./dooh.db --theme paper-fruit
+./scripts/setup/setup-stable.sh
 dooh whoami
 dooh task add --title "CLI smoke: water basil pot" --priority now
 dooh task list
@@ -193,11 +207,10 @@ GOCACHE=$(pwd)/.cache/go-build go test ./... -cover
 
 ## Fast demo seed + colorful dashboard
 ```bash
-dooh db init --db ./dooh.db
-dooh demo seed --db ./dooh.db
-dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12
-dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --static
-dooh tui --db ./dooh.db --api-key "<PASTE_KEY>" --theme midnight-arcade --limit 12 --plain
+./scripts/setup/setup-dev.sh
+dooh-dev tui --theme midnight-arcade --limit 12
+dooh-dev tui --theme midnight-arcade --limit 12 --static
+dooh-dev tui --theme midnight-arcade --limit 12 --plain
 ```
 
 TUI controls:
@@ -315,6 +328,7 @@ dooh --profile human config show
 - `DOOH_MODE` supports `human`, `ai`, and legacy `agent`, but is optional.
 - ai env key (`DOOH_AI_KEY`, or `DOOH_API_KEY` for compatibility) enables zero-touch ai operation.
 - when ai env key is present, profile is auto-forced to `ai` unless `--profile` is explicitly provided.
+- `DOOH_HOME` optionally overrides app home for config/auth/context files (useful for dev channel isolation).
 - Key `client_type` must be interactive (`human_cli` or `agent_cli`) for runtime commands.
 - profile-scoped keys are written to `~/.config/dooh/auth/<profile>.<actor>.key` with `0600` permissions.
 - user/key lifecycle admin actions are human-only by default; non-human requires system key + `--allow-system-admin`.
