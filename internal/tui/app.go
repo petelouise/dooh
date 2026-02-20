@@ -1267,8 +1267,24 @@ func (m *model) renderChip(k string, v string, focused bool, p palette) string {
 	if m.plain {
 		return raw
 	}
+	theme := m.themes[m.themeIndex]
 	if focused {
+		bgHex := strings.TrimSpace(theme.Colors["accent"])
+		if bgHex == "" {
+			bgHex = strings.TrimSpace(theme.Colors["panel"])
+		}
+		fgHex := readableTextHex(bgHex)
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, raw)
+			}
+		}
 		return m.colorizeBg(raw, p.Warn, p.BgAccent)
+	}
+	fgHex := strings.TrimSpace(theme.Colors["text"])
+	bgHex := strings.TrimSpace(theme.Colors["background"])
+	if fgHex != "" && bgHex != "" && hasReadableContrast(bgHex, fgHex) {
+		return m.paintHex(raw, fgHex)
 	}
 	return m.colorize(raw, p.Muted)
 }
@@ -1630,11 +1646,11 @@ func (m *model) paintFilterBarLine(s string, cols int, p palette) string {
 		return line
 	}
 	theme := m.themes[m.themeIndex]
-	bgHex := strings.TrimSpace(theme.Colors["background"])
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
 	if bgHex == "" {
-		bgHex = strings.TrimSpace(theme.Colors["panel"])
+		bgHex = strings.TrimSpace(theme.Colors["background"])
 	}
-	fgHex := strings.TrimSpace(theme.Colors["muted"])
+	fgHex := strings.TrimSpace(theme.Colors["text"])
 	if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
 		fgHex = readableTextHex(bgHex)
 	}
@@ -1653,7 +1669,7 @@ func (m *model) paintSubheaderLine(s string, cols int, p palette) string {
 	}
 	theme := m.themes[m.themeIndex]
 	bgHex := strings.TrimSpace(theme.Colors["panel"])
-	fgHex := strings.TrimSpace(theme.Colors["muted"])
+	fgHex := strings.TrimSpace(theme.Colors["text"])
 	if bgHex != "" {
 		if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
 			fgHex = readableTextHex(bgHex)
@@ -1693,14 +1709,23 @@ func (m *model) paintMuted(s string, p palette) string {
 }
 
 func (m *model) paintStatus(s string, status string, p palette) string {
+	if m.plain {
+		return s
+	}
+	theme := m.themes[m.themeIndex]
+	colorHex := strings.TrimSpace(theme.Colors["accent"])
 	switch status {
 	case "completed":
-		return m.colorize(s, p.Done)
+		colorHex = strings.TrimSpace(theme.Colors["success"])
 	case "archived":
-		return m.colorize(s, p.Archive)
-	default:
-		return m.colorize(s, p.Open)
+		colorHex = strings.TrimSpace(theme.Colors["muted"])
+	case "open":
+		colorHex = strings.TrimSpace(theme.Colors["accent"])
 	}
+	if colorHex != "" {
+		return m.paintHex(s, colorHex)
+	}
+	return m.colorize(s, p.Open)
 }
 
 func (m *model) paintStatusMarker(line string, marker string, status string, p palette) string {
@@ -1714,10 +1739,19 @@ func (m *model) paintDueSuffix(line string, title string, r row, now time.Time, 
 	if m.plain {
 		return line
 	}
+	theme := m.themes[m.themeIndex]
+	warnHex := strings.TrimSpace(theme.Colors["warning"])
+	dangerHex := strings.TrimSpace(theme.Colors["danger"])
 	if isOverdue(r, now, m.loc) {
+		if dangerHex != "" {
+			return strings.Replace(line, " !", m.paintHex(" !", dangerHex), 1)
+		}
 		return strings.Replace(line, " !", m.colorize(" !", 203), 1)
 	}
 	if strings.HasSuffix(title, " ⚑") {
+		if warnHex != "" {
+			return strings.Replace(line, " ⚑", m.paintHex(" ⚑", warnHex), 1)
+		}
 		return strings.Replace(line, " ⚑", m.colorize(" ⚑", p.Warn), 1)
 	}
 	return line
@@ -1745,20 +1779,39 @@ func (m *model) paintCollectionLine(line string, p palette) string {
 	if m.plain {
 		return line
 	}
+	theme := m.themes[m.themeIndex]
+	chart1 := strings.TrimSpace(theme.Colors["chart1"])
+	chart2 := strings.TrimSpace(theme.Colors["chart2"])
+	chart3 := strings.TrimSpace(theme.Colors["chart3"])
+	chart4 := strings.TrimSpace(theme.Colors["chart4"])
+	accent2 := strings.TrimSpace(theme.Colors["accent2"])
+	muted := strings.TrimSpace(theme.Colors["muted"])
 	switch {
 	case strings.Contains(line, "projects:"):
-		return m.colorize(line, 81)
+		if chart1 != "" {
+			return m.paintHex(line, chart1)
+		}
 	case strings.Contains(line, "goals:"):
-		return m.colorize(line, 186)
+		if chart2 != "" {
+			return m.paintHex(line, chart2)
+		}
 	case strings.Contains(line, "areas:"):
-		return m.colorize(line, 180)
+		if chart3 != "" {
+			return m.paintHex(line, chart3)
+		}
 	case strings.Contains(line, "groups:"):
-		return m.colorize(line, 152)
+		if chart4 != "" {
+			return m.paintHex(line, chart4)
+		}
 	case strings.Contains(line, "tags:"):
-		return m.colorize(line, 117)
-	default:
-		return m.colorize(line, p.Muted)
+		if accent2 != "" {
+			return m.paintHex(line, accent2)
+		}
 	}
+	if muted != "" {
+		return m.paintHex(line, muted)
+	}
+	return m.colorize(line, p.Muted)
 }
 
 func (m *model) paintSelected(s string, p palette) string {
@@ -1771,12 +1824,6 @@ func (m *model) paintSelected(s string, p palette) string {
 	if bgHex != "" {
 		if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
 			fgHex = readableTextHex(bgHex)
-		}
-		pulse := (time.Now().UnixNano()/500_000_000)%2 == 0
-		if pulse {
-			if alt := strings.TrimSpace(theme.Colors["accent2"]); alt != "" {
-				bgHex = alt
-			}
 		}
 		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
 			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {

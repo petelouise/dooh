@@ -6,38 +6,26 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"dooh/internal/db"
 )
-
-type teaTickMsg struct{}
 
 type teaProgramModel struct {
 	core   model
 	width  int
 	height int
 	err    error
-
-	titleStyle  lipgloss.Style
-	footerStyle lipgloss.Style
 }
 
 func newTeaProgramModel(sqlite db.SQLite, catalog ThemeCatalog, themeID string, filter string, limit int, loc *time.Location, identity Identity, plain bool) teaProgramModel {
 	core := newModel(sqlite, catalog, themeID, filter, limit, loc, identity, plain)
 	return teaProgramModel{
-		core:        core,
-		titleStyle:  lipgloss.NewStyle().Bold(true),
-		footerStyle: lipgloss.NewStyle().Faint(true),
+		core: core,
 	}
 }
 
 func (m teaProgramModel) Init() tea.Cmd {
-	return teaTickCmd()
-}
-
-func teaTickCmd() tea.Cmd {
-	return tea.Tick(450*time.Millisecond, func(time.Time) tea.Msg { return teaTickMsg{} })
+	return nil
 }
 
 func (m teaProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -53,9 +41,7 @@ func (m teaProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-		return m, teaTickCmd()
-	case teaTickMsg:
-		return m, teaTickCmd()
+		return m, nil
 	}
 	return m, nil
 }
