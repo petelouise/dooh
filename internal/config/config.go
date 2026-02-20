@@ -70,12 +70,16 @@ func candidatePaths(explicitPath string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
+	configHome := strings.TrimSpace(os.Getenv("DOOH_HOME"))
+	if configHome == "" {
+		configHome = filepath.Join(home, ".config", "dooh")
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve cwd: %w", err)
 	}
 	return []string{
-		filepath.Join(home, ".config", "dooh", "config.toml"),
+		filepath.Join(configHome, "config.toml"),
 		filepath.Join(cwd, ".dooh", "config.toml"),
 	}, nil
 }

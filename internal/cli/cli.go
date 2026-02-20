@@ -1407,19 +1407,30 @@ func createAPIKey(sqlite db.SQLite, userID string, clientType string, scopes str
 }
 
 func authStoreDir() (string, error) {
-	home, err := os.UserHomeDir()
+	base, err := appHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "dooh", "auth"), nil
+	return filepath.Join(base, "auth"), nil
 }
 
 func contextFilePath() (string, error) {
+	base, err := appHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "context.json"), nil
+}
+
+func appHomeDir() (string, error) {
+	if v := strings.TrimSpace(os.Getenv("DOOH_HOME")); v != "" {
+		return v, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "dooh", "context.json"), nil
+	return filepath.Join(home, ".config", "dooh"), nil
 }
 
 func readContextState() (contextState, error) {

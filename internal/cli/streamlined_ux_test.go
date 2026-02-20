@@ -189,6 +189,44 @@ func TestReadStoredKeyMissingFile(t *testing.T) {
 	}
 }
 
+func TestDOOHHomeOverridesAuthAndContextPaths(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	sqlite, dbPath := newReadAuthDB(t)
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u1','Human Demo','active');")
+	mustExec(t, sqlite, "INSERT INTO api_keys(id,user_id,key_prefix,key_hash,scopes,client_type,revoked_at) VALUES('k1','u1','hhhhhhhh','"+auth.HashAPIKey("dooh_human_key")+"','tasks:read,collections:read,export:run,users:admin','human_cli',NULL);")
+
+	home := t.TempDir()
+	doohHome := filepath.Join(t.TempDir(), "dooh-alt")
+	oldHome := os.Getenv("HOME")
+	oldDoohHome := os.Getenv("DOOH_HOME")
+	defer func() {
+		_ = os.Setenv("HOME", oldHome)
+		_ = os.Setenv("DOOH_HOME", oldDoohHome)
+	}()
+	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("DOOH_HOME", doohHome)
+
+	var out bytes.Buffer
+	if err := Run([]string{"--profile", "human", "login", "--db", dbPath, "--api-key", "dooh_human_key"}, &out); err != nil {
+		t.Fatalf("login should pass: %v", err)
+	}
+	keyPath := filepath.Join(doohHome, "auth", "human.human.key")
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("expected key under DOOH_HOME path: %v", err)
+	}
+
+	out.Reset()
+	if err := Run([]string{"context", "set", "--profile", "human", "--db", dbPath, "--theme", "paper-fruit"}, &out); err != nil {
+		t.Fatalf("context set should pass: %v", err)
+	}
+	contextPath := filepath.Join(doohHome, "context.json")
+	if _, err := os.Stat(contextPath); err != nil {
+		t.Fatalf("expected context under DOOH_HOME path: %v", err)
+	}
+}
+
 func TestInitDatabaseReusable(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 not available")
