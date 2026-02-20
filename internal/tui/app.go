@@ -572,7 +572,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 	}
 
 	headerLines := 8
-	footerLines := 2
+	footerLines := 3
 	bodyBudget := lines - headerLines - footerLines
 	if m.editFilter && m.dropdownOpen {
 		bodyBudget -= m.dropdownHeight()
@@ -666,7 +666,7 @@ func (m *model) renderHeader(cols int, p palette) string {
 func (m *model) renderBodyByView(cols, lines int, p palette) ([]string, string, string, error) {
 	now := time.Now()
 	headerLines := 8
-	footerLines := 2
+	footerLines := 3
 	bodyBudget := lines - headerLines - footerLines
 	if m.editFilter && m.dropdownOpen {
 		bodyBudget -= m.dropdownHeight()
@@ -1659,7 +1659,7 @@ func (m *model) paintTitleBar(s string, cols int, p palette) string {
 		}
 		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
 			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
 			}
 		}
 	}
@@ -1685,7 +1685,7 @@ func (m *model) paintFilterBarLine(s string, cols int, p palette) string {
 	}
 	if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
 		if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-			return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+			return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
 		}
 	}
 	return m.colorize(line, p.Muted)
@@ -1705,7 +1705,7 @@ func (m *model) paintSubheaderLine(s string, cols int, p palette) string {
 		}
 		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
 			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
 			}
 		}
 	}
@@ -1726,7 +1726,7 @@ func (m *model) paintFooterLine(s string, cols int, p palette) string {
 		}
 		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
 			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
 			}
 		}
 	}

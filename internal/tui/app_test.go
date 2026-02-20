@@ -180,6 +180,18 @@ func TestFilterFocusTabMoves(t *testing.T) {
 	}
 }
 
+func TestFooterHotkeysAlwaysRendered(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	rendered, err := m.render(80, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, "keys: arrows") {
+		t.Fatalf("expected footer hotkey hint line in rendered output")
+	}
+}
+
 func TestEnterOnProjectViewDrillsToScopedTasks(t *testing.T) {
 	sqlite := newTUIDB(t)
 	m := testModel(sqlite)
