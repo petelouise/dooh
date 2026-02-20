@@ -1,7 +1,6 @@
 package tui
 
-// teaTaskViewScaffold intentionally keeps a thin shell for migration sequencing.
-// Legacy renderer remains source of truth until Bubble Tea dependencies are added.
+// teaTaskViewScaffold remains as a marker for future view extraction.
 func teaTaskViewScaffold() string {
-	return "task-view-scaffold"
+	return "tea-task-view"
 }

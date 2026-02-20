@@ -1,21 +1,24 @@
 package tui
 
+// teaKeyMap defines the displayed key hints for the Bubble Tea path.
 type teaKeyMap struct {
-	Up       string
-	Down     string
-	Expand   string
-	Collapse string
-	Filter   string
-	Quit     string
+	UpDown string
+	Expand string
+	Filter string
+	Facets string
+	Views  string
+	Theme  string
+	Quit   string
 }
 
 func defaultTeaKeyMap() teaKeyMap {
 	return teaKeyMap{
-		Up:       "up",
-		Down:     "down",
-		Expand:   "enter",
-		Collapse: "left",
-		Filter:   "/",
-		Quit:     "q",
+		UpDown: "↑/↓ move",
+		Expand: "Enter expand",
+		Filter: "f text",
+		Facets: "g tags · a assignee",
+		Views:  "1-5 views",
+		Theme:  "t theme",
+		Quit:   "q quit",
 	}
 }

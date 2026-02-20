@@ -1,9 +1,10 @@
 package tui
 
-// teaModelState captures task-view state intended for Bubble Tea migration.
-// It is kept compile-safe in this build and used by future renderer phases.
+// teaModelState is retained for migration bookkeeping and test hooks.
 type teaModelState struct {
 	Selected   int
 	ExpandedID string
 	Filter     FilterState
+	View       string
+	ThemeID    string
 }

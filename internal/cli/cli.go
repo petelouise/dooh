@@ -1223,7 +1223,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	limit := fs.Int("limit", 12, "max tasks to display")
 	static := fs.Bool("static", false, "render once and exit")
 	plain := fs.Bool("plain", false, "disable ANSI and render plain table")
-	renderer := fs.String("renderer", "auto", "renderer: auto|legacy|tea")
+	renderer := fs.String("renderer", "tea", "renderer: tea|legacy|auto")
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
@@ -1289,7 +1289,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	}
 	r := strings.ToLower(strings.TrimSpace(*renderer))
 	switch r {
-	case "", "auto", "tea":
+	case "", "tea", "auto":
 		if err := tui.RunInteractiveTea(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc, identity, false); err != nil {
 			if r == "tea" {
 				return err
@@ -1301,7 +1301,7 @@ func runTUI(rt runtime, args []string, out io.Writer) error {
 	case "legacy":
 		return tui.RunInteractive(os.Stdin, out, sqlite, catalog, chosen.ID, *filter, *limit, loc, identity, false)
 	default:
-		return errors.New("--renderer must be auto, legacy, or tea")
+		return errors.New("--renderer must be tea, legacy, or auto")
 	}
 }
 

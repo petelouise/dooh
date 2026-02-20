@@ -7,7 +7,7 @@ Working local MVP includes:
 - sqlite-backed CLI commands (`db`, `user`, `key`, `task`, `collection`, `export`),
 - append-only events + outbox writes for mutating task/collection actions,
 - colorful TUI theme catalog with selection,
-- staged renderer architecture (`legacy` active, `tea` migration path scaffolded),
+- Bubble Tea default interactive TUI with legacy renderer fallback,
 - static JSON website export.
 
 ## Build
@@ -237,22 +237,20 @@ dooh tui --theme sunset-pop --filter rollback
 ```
 
 ## TUI renderer architecture
-The TUI now supports renderer selection:
-- `--renderer auto` (default): prefer `tea` path, fallback to legacy as needed.
-- `--renderer legacy`: force current ANSI renderer.
-- `--renderer tea`: explicit migration path for task-view-focused renderer.
+The TUI supports renderer selection:
+- `--renderer tea` (default): Bubble Tea interactive renderer.
+- `--renderer auto`: alias of `tea` with legacy fallback.
+- `--renderer legacy`: force the ANSI compatibility renderer.
 
 Examples:
 ```bash
-dooh tui --renderer auto
-dooh tui --renderer legacy
+dooh tui
 dooh tui --renderer tea
+dooh tui --renderer legacy
 ```
 
 Notes:
-- In this build environment, Bubble Tea dependencies are not fetched from the network.
-- The `tea` path is scaffolded and currently delegates to the stable legacy interaction loop.
-- Once Bubble Tea deps are available, task view migration can be switched on without CLI breakage.
+- `legacy` remains available as a compatibility fallback.
 
 ## Config profiles
 Profiles are named blocks in config files:
