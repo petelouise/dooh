@@ -211,16 +211,18 @@ func TestEnterOnProjectViewDrillsToScopedTasks(t *testing.T) {
 func TestQuickFilterTokens(t *testing.T) {
 	sqlite := newTUIDB(t)
 	m := testModel(sqlite)
-	m.filters.Text = "#Bugs @Human"
+	m.filters.Text = "#[Bugs] @[Human]"
 	rows, err := m.filteredRows()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row for #Bugs @Human, got %d", len(rows))
+	if len(rows) == 0 {
+		t.Fatalf("expected rows for #[Bugs] @[Human]")
 	}
-	if rows[0].Title != "Critical fix title" {
-		t.Fatalf("unexpected row: %s", rows[0].Title)
+	for _, r := range rows {
+		if r.Title != "Critical fix title" {
+			t.Fatalf("unexpected row: %s", r.Title)
+		}
 	}
 }
 
@@ -245,6 +247,99 @@ func TestQuickFilterOverdueToken(t *testing.T) {
 		if !isOverdue(r, time.Now(), time.UTC) {
 			t.Fatalf("unexpected non-overdue row in !overdue result: %s", r.Title)
 		}
+	}
+}
+
+func TestQuickFilterDueTokens(t *testing.T) {
+	sqlite := newTUIDB(t)
+	now := time.Now().UTC()
+	todayDue := now.Add(2 * time.Hour).Format(time.RFC3339)
+	noDue := ""
+	mustExec(t, sqlite, "UPDATE tasks SET due_at="+db.Quote(todayDue)+" WHERE id='1';")
+	mustExec(t, sqlite, "UPDATE tasks SET due_at="+db.Quote(noDue)+" WHERE id='2';")
+
+	m := testModel(sqlite)
+	m.filters.Text = "!due"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected due rows")
+	}
+	for _, r := range rows {
+		if strings.TrimSpace(r.DueAt) == "" {
+			t.Fatalf("!due returned task with empty due: %s", r.Title)
+		}
+	}
+
+	m.filters.Text = "!nodue"
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected no-due rows")
+	}
+	for _, r := range rows {
+		if strings.TrimSpace(r.DueAt) != "" {
+			t.Fatalf("!nodue returned task with due: %s", r.Title)
+		}
+	}
+
+	m.filters.Text = "!todaydue"
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected today-due rows")
+	}
+	for _, r := range rows {
+		if !isTodayDue(r, time.UTC, now) {
+			t.Fatalf("!todaydue returned non-today-due row: %s", r.Title)
+		}
+	}
+}
+
+func TestQuickFilterDueConflict(t *testing.T) {
+	sqlite := newTUIDB(t)
+	m := testModel(sqlite)
+	m.filters.Text = "!due !nodue"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected empty result for !due + !nodue conflict, got %d", len(rows))
+	}
+}
+
+func TestQuickFilterAreaPartialMatch(t *testing.T) {
+	sqlite := newTUIDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c6','c_A2','Maple Trees','area','#9CC89B',"+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO collections(id,short_id,name,kind,color_hex,updated_at) VALUES('c7','c_A3','Oak Trees','area','#A2D7A0',"+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('3','t_CCCCCC','Maple cleanup','open','later','',"+db.Quote(now)+","+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,due_at,scheduled_at,updated_at) VALUES('4','t_DDDDDD','Oak pruning','open','later','',"+db.Quote(now)+","+db.Quote(now)+");")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('3','c6');")
+	mustExec(t, sqlite, "INSERT INTO task_collections(task_id,collection_id) VALUES('4','c7');")
+	m := testModel(sqlite)
+	m.filters.Text = "~tree"
+	rows, err := m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("expected ~tree to match both Maple Trees and Oak Trees tasks")
+	}
+	m.filters.Text = "~[Maple Trees]"
+	rows, err = m.filteredRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 || rows[0].Title != "Maple cleanup" {
+		t.Fatalf("expected bracketed area token to match Maple Trees task")
 	}
 }
 

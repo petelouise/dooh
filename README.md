@@ -179,7 +179,7 @@ TUI controls:
 - `left`: collapse inline detail
 - `/`: edit fuzzy filter live (`Enter`/`Esc` close input)
 - `Tab` / `Shift+Tab`: move focus between filter fields
-- `f`: edit text filter (supports quick tokens: `#tag`, `~area`, `^goal`, `@assignee`, `!overdue`)
+- `f`: edit text filter (supports quick tokens: `#[tag]`, `~[area]`, `^[goal]`, `@[assignee]`, `!due`, `!todaydue`, `!overdue`, `!nodue`)
 - `g`: edit tags filter (typeahead + counts, multi-tag AND)
 - `a`: edit assignee filter (typeahead + counts)
 - `s`: cycle status filter
@@ -202,6 +202,7 @@ View headers are context-aware:
 TUI is currently read-focused:
 - no command bar workflow is required
 - filters are always visible at the top: text/status/priority/tag/assignee/scope
+- token matching is partial by default (`~tree` matches `Maple Trees` and `Oak Trees`)
 - `today` view defaults to tasks assigned to the authenticated user
 - toggle `mine/all` in Today view with `m`
 

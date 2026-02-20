@@ -625,7 +625,7 @@ func (m *model) render(cols int, lines int) (string, error) {
 	} else {
 		frame = append(frame, m.paintFooterLine(selectedLine, cols, p))
 	}
-	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text (#tag ~area ^goal @assignee !overdue), g tags, a assignee, m today-mode, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
+	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text (#[tag] ~[area] ^[goal] @[assignee] !due !todaydue !overdue !nodue), g tags, a assignee, m today-mode, s status, p priority, o sort, c clear, t theme, 1-5 views, q quit", cols, p))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -1076,6 +1076,15 @@ func (m *model) applyFilters(in []row) []row {
 		if len(qf.Assignees) > 0 && !matchesAllInCSV(r.Assignees, qf.Assignees) {
 			continue
 		}
+		if qf.HasDue && strings.TrimSpace(r.DueAt) == "" {
+			continue
+		}
+		if qf.NoDue && strings.TrimSpace(r.DueAt) != "" {
+			continue
+		}
+		if qf.TodayDue && !isTodayDue(r, m.loc, now) {
+			continue
+		}
 		if qf.Overdue && !isOverdue(r, now, m.loc) {
 			continue
 		}
@@ -1262,6 +1271,24 @@ func isTodayScheduled(s string, loc *time.Location, now time.Time) bool {
 	return sy == ny && sm == nm && sd == nd
 }
 
+func isTodayDue(r row, loc *time.Location, now time.Time) bool {
+	if strings.TrimSpace(r.DueAt) == "" {
+		return false
+	}
+	t, ok := parseTime(r.DueAt)
+	if !ok {
+		return false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	d := t.In(loc)
+	n := now.In(loc)
+	dy, dm, dd := d.Date()
+	ny, nm, nd := n.Date()
+	return dy == ny && dm == nm && dd == nd
+}
+
 func fuzzyMatch(hay, needle string) bool {
 	hay = strings.TrimSpace(strings.ToLower(hay))
 	needle = strings.TrimSpace(strings.ToLower(needle))
@@ -1302,25 +1329,35 @@ func fallbackDash(v string) string {
 func (m *model) renderFilterBar(scope string, cols int) string {
 	p := paletteForTheme(m.themes[m.themeIndex].ID)
 	qf := parseQuickFilter(m.activeFilter())
-	quickTokens := make([]string, 0, 6)
+	quickTokens := make([]string, 0, 12)
 	for _, t := range qf.Tags {
-		quickTokens = append(quickTokens, "#"+t)
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("#["+t+"]", "tag", p))
 	}
 	for _, a := range qf.Areas {
-		quickTokens = append(quickTokens, "~"+a)
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("~["+a+"]", "area", p))
 	}
 	for _, g := range qf.Goals {
-		quickTokens = append(quickTokens, "^"+g)
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("^["+g+"]", "goal", p))
 	}
 	for _, a := range qf.Assignees {
-		quickTokens = append(quickTokens, "@"+a)
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("@["+a+"]", "assignee", p))
+	}
+	if qf.HasDue {
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("!due", "due", p))
+	}
+	if qf.TodayDue {
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("!todaydue", "due", p))
+	}
+	if qf.NoDue {
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("!nodue", "due", p))
 	}
 	if qf.Overdue {
-		quickTokens = append(quickTokens, "!overdue")
+		quickTokens = append(quickTokens, m.renderQuickTokenChip("!overdue", "overdue", p))
 	}
+	quickDisplay := fallbackDash(strings.Join(limitTokens(quickTokens, 8), " "))
 	parts := []string{
 		m.renderChip("text", fallbackDash(qf.Text), m.filterFocus == filterFieldText && !m.editFilter, p),
-		m.renderChip("quick", fallbackDash(strings.Join(quickTokens, " ")), false, p),
+		m.renderChip("quick", quickDisplay, false, p),
 		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter, p),
 		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter, p),
 		m.renderChip("sort", m.filters.Sort, false, p),
@@ -1345,6 +1382,47 @@ func (m *model) renderChip(k string, v string, focused bool, _ palette) string {
 		return "{" + k + ":" + v + "}"
 	}
 	return raw
+}
+
+func limitTokens(tokens []string, max int) []string {
+	if len(tokens) <= max {
+		return tokens
+	}
+	out := append([]string{}, tokens[:max-1]...)
+	out = append(out, fmt.Sprintf("+%d", len(tokens)-(max-1)))
+	return out
+}
+
+func (m *model) renderQuickTokenChip(token string, kind string, p palette) string {
+	if m.plain {
+		return token
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
+	switch kind {
+	case "tag":
+		bgHex = strings.TrimSpace(theme.Colors["chart1"])
+	case "area":
+		bgHex = strings.TrimSpace(theme.Colors["chart3"])
+	case "goal":
+		bgHex = strings.TrimSpace(theme.Colors["chart2"])
+	case "assignee":
+		bgHex = strings.TrimSpace(theme.Colors["accent2"])
+	case "due":
+		bgHex = strings.TrimSpace(theme.Colors["warning"])
+	case "overdue":
+		bgHex = strings.TrimSpace(theme.Colors["danger"])
+	}
+	if bgHex == "" {
+		return token
+	}
+	fgHex := readableTextHex(bgHex)
+	if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+		if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+			return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, token)
+		}
+	}
+	return m.colorize(token, p.Warn)
 }
 
 func (m *model) editPrompt() string {
@@ -1539,6 +1617,15 @@ func (m *model) applyFiltersExcluding(in []row, excludeField int) []row {
 			if len(qf.Assignees) > 0 && !matchesAllInCSV(r.Assignees, qf.Assignees) {
 				continue
 			}
+			if qf.HasDue && strings.TrimSpace(r.DueAt) == "" {
+				continue
+			}
+			if qf.NoDue && strings.TrimSpace(r.DueAt) != "" {
+				continue
+			}
+			if qf.TodayDue && !isTodayDue(r, m.loc, now) {
+				continue
+			}
 			if qf.Overdue && !isOverdue(r, now, m.loc) {
 				continue
 			}
@@ -1563,6 +1650,9 @@ type quickFilter struct {
 	Goals     []string
 	Assignees []string
 	Overdue   bool
+	HasDue    bool
+	NoDue     bool
+	TodayDue  bool
 }
 
 func parseQuickFilter(input string) quickFilter {
@@ -1577,20 +1667,26 @@ func parseQuickFilter(input string) quickFilter {
 		switch {
 		case strings.EqualFold(tok, "!overdue"):
 			q.Overdue = true
+		case strings.EqualFold(tok, "!due"):
+			q.HasDue = true
+		case strings.EqualFold(tok, "!nodue"):
+			q.NoDue = true
+		case strings.EqualFold(tok, "!todaydue"):
+			q.TodayDue = true
 		case strings.HasPrefix(tok, "#"):
-			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Tags, v) {
+			if v := parseTypedToken(tok); v != "" && !containsExact(q.Tags, v) {
 				q.Tags = append(q.Tags, v)
 			}
 		case strings.HasPrefix(tok, "~"):
-			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Areas, v) {
+			if v := parseTypedToken(tok); v != "" && !containsExact(q.Areas, v) {
 				q.Areas = append(q.Areas, v)
 			}
 		case strings.HasPrefix(tok, "^"):
-			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Goals, v) {
+			if v := parseTypedToken(tok); v != "" && !containsExact(q.Goals, v) {
 				q.Goals = append(q.Goals, v)
 			}
 		case strings.HasPrefix(tok, "@"):
-			if v := normalizeQuickToken(tok[1:]); v != "" && !containsExact(q.Assignees, v) {
+			if v := parseTypedToken(tok); v != "" && !containsExact(q.Assignees, v) {
 				q.Assignees = append(q.Assignees, v)
 			}
 		default:
@@ -1604,7 +1700,17 @@ func parseQuickFilter(input string) quickFilter {
 func normalizeQuickToken(v string) string {
 	v = strings.TrimSpace(v)
 	v = strings.Trim(v, "\"")
+	if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+		v = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(v, "["), "]"))
+	}
 	return strings.TrimSpace(v)
+}
+
+func parseTypedToken(tok string) string {
+	if strings.TrimSpace(tok) == "" {
+		return ""
+	}
+	return normalizeQuickToken(tok[1:])
 }
 
 func splitFilterTokens(input string) []string {
@@ -1615,7 +1721,22 @@ func splitFilterTokens(input string) []string {
 	var out []string
 	var b strings.Builder
 	inQuote := false
-	for _, r := range in {
+	runes := []rune(in)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		// Canonical bracket form for typed filters, supports spaces without escaping:
+		// ~[Maple Trees], #[Deep Work], ^[Weekly Goal], @[Human Demo]
+		if !inQuote && b.Len() == 0 && (r == '#' || r == '~' || r == '^' || r == '@') && i+1 < len(runes) && runes[i+1] == '[' {
+			j := i + 2
+			for j < len(runes) && runes[j] != ']' {
+				j++
+			}
+			if j < len(runes) && runes[j] == ']' {
+				out = append(out, string(runes[i:j+1]))
+				i = j
+				continue
+			}
+		}
 		switch r {
 		case '"':
 			inQuote = !inQuote
@@ -1902,26 +2023,13 @@ func (m *model) paintTitleBar(s string, cols int, p palette) string {
 	return m.paintAccent(line, p.Accent)
 }
 
-func (m *model) paintFilterBarLine(s string, cols int, p palette) string {
+func (m *model) paintFilterBarLine(s string, cols int, _ palette) string {
 	line := fitLine(s, cols)
 	if m.plain {
 		return line
 	}
-	theme := m.themes[m.themeIndex]
-	bgHex := strings.TrimSpace(theme.Colors["panel"])
-	if bgHex == "" {
-		bgHex = strings.TrimSpace(theme.Colors["background"])
-	}
-	fgHex := strings.TrimSpace(theme.Colors["text"])
-	if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
-		fgHex = readableTextHex(bgHex)
-	}
-	if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
-		if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
-			return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[K\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
-		}
-	}
-	return m.colorize(line, p.Muted)
+	// Keep this row unwrapped so token chips can safely apply their own colors.
+	return line
 }
 
 func (m *model) paintSubheaderLine(s string, cols int, p palette) string {
