@@ -1,6 +1,7 @@
 # dooh
 
-`dooh` (pronounced "duo") is a local-first task/project/goal manager for a human + ai pair.
+`dooh` expands to "do?, oh!", and is pronounced "duo".
+It's is a local-first task/project/goal manager for a human + ai pair.
 
 ## Current status
 Working local MVP includes:
