@@ -593,10 +593,10 @@ func (m *model) render(cols int, lines int) (string, error) {
 	frame := make([]string, 0, lines)
 	frame = append(frame, m.paintTitleBar(titleLine, cols, p))
 	frame = append(frame, m.paintBanner(clampLine(bannerLine, cols), p))
-	frame = append(frame, filterLine)
+	frame = append(frame, m.paintFilterBarLine(filterLine, cols, p))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
-	frame = append(frame, clampLine(renderTabs(cols, m.view), cols))
-	frame = append(frame, clampLine(countLine, cols))
+	frame = append(frame, m.paintSubheaderLine(renderTabs(cols, m.view), cols, p))
+	frame = append(frame, m.paintSubheaderLine(countLine, cols, p))
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	frame = append(frame, m.renderHeader(cols, p))
 	if m.dropdownOpen && m.editFilter {
@@ -612,11 +612,11 @@ func (m *model) render(cols int, lines int) (string, error) {
 
 	frame = append(frame, m.paintMuted(strings.Repeat("-", cols), p))
 	if m.editFilter {
-		frame = append(frame, clampLine(m.editPrompt(), cols))
+		frame = append(frame, m.paintFooterLine(m.editPrompt(), cols, p))
 	} else {
-		frame = append(frame, clampLine(selectedLine, cols))
+		frame = append(frame, m.paintFooterLine(selectedLine, cols, p))
 	}
-	frame = append(frame, clampLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text, g tags, a assignee, m today-mode, s status, p priority, c clear, t theme, 1-5 views, q quit", cols))
+	frame = append(frame, m.paintFooterLine("keys: arrows, Enter action, Tab/Shift+Tab focus, f text, g tags, a assignee, m today-mode, s status, p priority, c clear, t theme, 1-5 views, q quit", cols, p))
 
 	if len(frame) > lines {
 		frame = frame[:lines]
@@ -1246,26 +1246,31 @@ func fallbackDash(v string) string {
 }
 
 func (m *model) renderFilterBar(scope string, cols int) string {
+	p := paletteForTheme(m.themes[m.themeIndex].ID)
 	parts := []string{
-		filterChip("text", fallbackDash(m.activeFilter()), m.filterFocus == filterFieldText && !m.editFilter),
-		filterChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter),
-		filterChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter),
-		filterChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter),
-		filterChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter),
-		filterChip("scope", scope, false),
+		m.renderChip("text", fallbackDash(m.activeFilter()), m.filterFocus == filterFieldText && !m.editFilter, p),
+		m.renderChip("status", m.filters.Status, m.filterFocus == filterFieldStatus && !m.editFilter, p),
+		m.renderChip("priority", m.filters.Priority, m.filterFocus == filterFieldPriority && !m.editFilter, p),
+		m.renderChip("tags", fallbackDash(strings.Join(m.filters.Tags, ",")), m.filterFocus == filterFieldTags && !m.editFilter, p),
+		m.renderChip("assignee", fallbackDash(m.filters.Assignee), m.filterFocus == filterFieldAssignee && !m.editFilter, p),
+		m.renderChip("scope", scope, false, p),
 	}
 	if m.view == "today" {
-		parts = append(parts, filterChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && !m.editFilter))
+		parts = append(parts, m.renderChip("today", m.filters.TodayMode, m.filterFocus == filterFieldTodayMode && !m.editFilter, p))
 	}
 	line := "FILTERS  " + strings.Join(parts, " ")
-	return m.paintMuted(clampLine(line, cols), paletteForTheme(m.themes[m.themeIndex].ID))
+	return clampLine(line, cols)
 }
 
-func filterChip(k string, v string, focused bool) string {
-	if focused {
-		return fmt.Sprintf("{%s:%s}", k, v)
+func (m *model) renderChip(k string, v string, focused bool, p palette) string {
+	raw := fmt.Sprintf("[%s:%s]", k, v)
+	if m.plain {
+		return raw
 	}
-	return fmt.Sprintf("[%s:%s]", k, v)
+	if focused {
+		return m.colorizeBg(raw, p.Warn, p.BgAccent)
+	}
+	return m.colorize(raw, p.Muted)
 }
 
 func (m *model) editPrompt() string {
@@ -1619,6 +1624,70 @@ func (m *model) paintTitleBar(s string, cols int, p palette) string {
 	return m.paintAccent(line, p.Accent)
 }
 
+func (m *model) paintFilterBarLine(s string, cols int, p palette) string {
+	line := fitLine(s, cols)
+	if m.plain {
+		return line
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["background"])
+	if bgHex == "" {
+		bgHex = strings.TrimSpace(theme.Colors["panel"])
+	}
+	fgHex := strings.TrimSpace(theme.Colors["muted"])
+	if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
+		fgHex = readableTextHex(bgHex)
+	}
+	if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+		if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+			return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+		}
+	}
+	return m.colorize(line, p.Muted)
+}
+
+func (m *model) paintSubheaderLine(s string, cols int, p palette) string {
+	line := fitLine(s, cols)
+	if m.plain {
+		return line
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
+	fgHex := strings.TrimSpace(theme.Colors["muted"])
+	if bgHex != "" {
+		if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
+			fgHex = readableTextHex(bgHex)
+		}
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+			}
+		}
+	}
+	return m.paintMuted(line, p)
+}
+
+func (m *model) paintFooterLine(s string, cols int, p palette) string {
+	line := fitLine(s, cols)
+	if m.plain {
+		return line
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
+	fgHex := strings.TrimSpace(theme.Colors["text"])
+	if bgHex != "" {
+		if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
+			fgHex = readableTextHex(bgHex)
+		}
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+				return fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, line)
+			}
+		}
+	}
+	return m.paintMuted(line, p)
+}
+
 func (m *model) paintMuted(s string, p palette) string {
 	return m.colorize(s, p.Muted)
 }
@@ -1695,6 +1764,26 @@ func (m *model) paintCollectionLine(line string, p palette) string {
 func (m *model) paintSelected(s string, p palette) string {
 	if m.plain {
 		return s
+	}
+	theme := m.themes[m.themeIndex]
+	bgHex := strings.TrimSpace(theme.Colors["panel"])
+	fgHex := strings.TrimSpace(theme.Colors["text"])
+	if bgHex != "" {
+		if fgHex == "" || !hasReadableContrast(bgHex, fgHex) {
+			fgHex = readableTextHex(bgHex)
+		}
+		pulse := (time.Now().UnixNano()/500_000_000)%2 == 0
+		if pulse {
+			if alt := strings.TrimSpace(theme.Colors["accent2"]); alt != "" {
+				bgHex = alt
+			}
+		}
+		if rbg, gbg, bbg, ok := parseHexColor(bgHex); ok {
+			if rfg, gfg, bfg, ok := parseHexColor(fgHex); ok {
+				line := fmt.Sprintf("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%s\x1b[0m", rfg, gfg, bfg, rbg, gbg, bbg, s)
+				return strings.Replace(line, ">", fmt.Sprintf("\x1b[38;5;%dm>\x1b[0m", p.Warn), 1)
+			}
+		}
 	}
 	return strings.Replace(s, ">", fmt.Sprintf("\x1b[38;5;%dm>\x1b[0m", p.Warn), 1)
 }

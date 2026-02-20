@@ -7,6 +7,7 @@ Working local MVP includes:
 - sqlite-backed CLI commands (`db`, `user`, `key`, `task`, `collection`, `export`),
 - append-only events + outbox writes for mutating task/collection actions,
 - colorful TUI theme catalog with selection,
+- staged renderer architecture (`legacy` active, `tea` migration path scaffolded),
 - static JSON website export.
 
 ## Build
@@ -142,6 +143,8 @@ dooh task list
 ```bash
 dooh tui
 dooh tui --static --plain
+dooh tui --renderer legacy
+dooh tui --renderer tea
 ```
 
 ### Audit verification
@@ -233,6 +236,24 @@ dooh tui --theme sunset-pop
 dooh tui --theme sunset-pop --filter rollback
 ```
 
+## TUI renderer architecture
+The TUI now supports renderer selection:
+- `--renderer auto` (default): prefer `tea` path, fallback to legacy as needed.
+- `--renderer legacy`: force current ANSI renderer.
+- `--renderer tea`: explicit migration path for task-view-focused renderer.
+
+Examples:
+```bash
+dooh tui --renderer auto
+dooh tui --renderer legacy
+dooh tui --renderer tea
+```
+
+Notes:
+- In this build environment, Bubble Tea dependencies are not fetched from the network.
+- The `tea` path is scaffolded and currently delegates to the stable legacy interaction loop.
+- Once Bubble Tea deps are available, task view migration can be switched on without CLI breakage.
+
 ## Config profiles
 Profiles are named blocks in config files:
 - global: `~/.config/dooh/config.toml`
@@ -275,3 +296,12 @@ Using `go run` is still supported for development:
 go run ./cmd/dooh version
 go run ./cmd/dooh context show
 ```
+
+## TUI troubleshooting
+- If visuals look wrong in your terminal, try:
+  - `dooh tui --renderer legacy`
+  - `dooh tui --plain`
+- If non-interactive (pipe/CI), TUI auto-falls back to plain static output.
+- If theme contrast looks poor, switch theme quickly with:
+  - `dooh tui --theme paper-fruit`
+  - `dooh tui --theme mint-circuit`
