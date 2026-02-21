@@ -29,7 +29,7 @@ tightened.
 
 ## Containment rules
 
-```
+```text
 goal   ←— can be top-level, or nested under another goal
   └── goal      (optional nesting: year > quarter > sprint)
   └── project
@@ -165,7 +165,7 @@ The hierarchy handles this; the checklist does not need to.
 
 This also clarifies the four-level structure of the whole system:
 
-```
+```text
 area / goal
   └── project   (a coordinated body of work)
         └── task   (a unit of work owned by one actor)
@@ -227,7 +227,7 @@ The collection model above calls for a different navigation model:
 - **Breadcrumb in the filter bar** shows the path taken: `Work > Product redesign` or
   `Reduce churn > Product redesign`. Both are valid paths to the same project.
 - **`Left` key** goes up one level in the breadcrumb.
-- **Numbered view modes** (1–5) apply *within* the current scope, not globally.
+- **Numbered view modes** (1–5) apply _within_ the current scope, not globally.
 
 The TUI scope state (`ScopeKind`, `ScopeID`, `ScopeName`) already exists. It needs to
 be extended with a `ScopePath` (the sequence of IDs from root to current node) to

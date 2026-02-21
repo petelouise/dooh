@@ -132,11 +132,11 @@ implementation detail):
 Four kinds, no others: `area`, `goal`, `project`, `tag`. Remove `class` and `custom`.
 
 The containment rules reflect that areas and goals are fundamentally different things —
-areas are *where and when* (life domains: home, work, school), goals are *why*
+areas are _where and when_ (life domains: home, work, school), goals are _why_
 (outcomes: "launch Q2 product", "run a marathon"). They are orthogonal organizing axes,
 both top-level, not one nested inside the other.
 
-```
+```text
 area    top-level only; cannot belong to any other collection
           └── project, or task directly
 goal    top-level, or nested under another goal (year > quarter)
@@ -161,7 +161,7 @@ flat views.
 - The breadcrumb in the filter bar shows the path taken (`Work > Product redesign` or
   `Reduce churn > Product redesign`). Both are valid paths to the same project.
 - `Left` goes up one level in the breadcrumb.
-- Numbered view modes (`1`–`5`) apply *within* the current scope, not globally.
+- Numbered view modes (`1`–`5`) apply _within_ the current scope, not globally.
 - The TUI scope state (`ScopeKind`, `ScopeID`, `ScopeName`) needs a `ScopePath` field
   to support breadcrumb rendering and `Left` navigation.
 
@@ -206,7 +206,7 @@ should feel elegant.
 
 **The shift:** `dooh init` is an interactive first-time setup command.
 
-```
+```text
 $ dooh init
 Welcome to dooh.
 Your name: Pete
@@ -239,7 +239,7 @@ line between a task and its subtasks, and the four-level structure of the system
 **The shift:** subtasks become a lightweight checklist on a task. Text plus a checked
 state. Nothing more.
 
-```
+```text
 area / goal
   └── project   (a body of work)
         └── task   (a unit of work)
@@ -333,6 +333,13 @@ star; these are the immediate next steps ordered by impact.
 - **Area view in TUI**: dedicated areas view with completion counts, `6` shortcut. Reuse
   the progress-row loader used by project/goal views.
 
+- **Priority semantics**: define and document `now`/`soon`/`later` with concrete guidance
+  (e.g., `now` = blocking something today, `soon` = committed this week, `later` = on the
+  radar). Add to `task add --help`, TUI expanded card, and README.
+
+- **Filter token syntax**: add a `#tag ~area @user …` placeholder to the TUI filter input
+  and a token syntax hint to the TUI help screen or expanded footer.
+
 **P3 — Polish and completeness**
 
 - **Dual binary → single binary**: update install script, update documentation, add
@@ -349,6 +356,23 @@ star; these are the immediate next steps ordered by impact.
 
 - **`dooh init`** non-interactive mode: `--name`, `--ai-key`, `--db` flags for
   script-driven setup.
+
+- **Outbox**: add `dooh outbox status` command showing pending/delivered/failed counts,
+  implement a consumer, or remove the table and its accumulating rows.
+
+- **README**: lead with the setup script; move the manual 6-step sequence to an appendix.
+
+- **`whoami`/`context show`/`env` boundary clarification**: document what each command is
+  authoritative for; add a brief statement to each command's output or `--help`.
+
+**P4 — Nice to have**
+
+- **`export site` bundled HTML viewer**: a single `index.html` that reads `tasks.json` and
+  `collections.json` with no build step and no external dependencies, making the export
+  immediately usable.
+
+- **Bubble Tea viewport + command palette**: full terminal resize support and a
+  command-palette overlay for discoverability.
 
 ---
 
@@ -405,7 +429,7 @@ the pair cannot maintain consistent priority discipline over time. A suggested d
 - **`later`**: on the radar, not scheduled. Review during weekly planning.
 
 This definition should appear in `dooh task add --help`, in the TUI footer or expanded
-task card, and in the README.
+task card, and in the README. _(See Priority Index: P2)_
 
 ---
 
@@ -434,6 +458,7 @@ shows hotkeys for view modes but not for filter tokens.
 
 At minimum: show a one-line placeholder in the filter input field (`#tag ~area @user …`),
 and add a token syntax hint to the TUI help screen (or the expanded footer row).
+_(See Priority Index: P2)_
 
 ---
 
@@ -475,7 +500,7 @@ database concepts before they have created a single task.
 
 The fix is `dooh init` (see Proposed Big Change 6), but even before that, the README
 should lead with the setup script, not the manual steps. Manual steps belong in an
-appendix.
+appendix. _(See Priority Index: P2 / `dooh init`)_
 
 ---
 
@@ -531,7 +556,6 @@ discoverability.
 | P2 | `dooh init` interactive setup command | UX improvement |
 | P2 | Area view in TUI (`6` key) | Feature |
 | P2 | Priority semantics: define and document `now/soon/later` | Clarity |
-| P2 | Remove `groups` from TUI or give it a definition | Cleanup |
 | P2 | Filter token syntax: placeholder + help hint in TUI | Discoverability |
 | P3 | Dual binary → single binary with `--home` flag | Simplification |
 | P3 | Theme redesign: semantic tokens + contrast tests | Polish |
