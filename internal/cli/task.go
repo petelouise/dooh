@@ -99,7 +99,7 @@ func printTaskListHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "list tasks with optional filters")
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "flags:")
-	_, _ = fmt.Fprintln(out, "  --status <string>      open|completed|archived|all (default: open)")
+	_, _ = fmt.Fprintln(out, "  --status <string>      open|in_progress|completed|archived|all (default: open)")
 	_, _ = fmt.Fprintln(out, "  --priority <string>    now|soon|later|all (default: all)")
 	_, _ = fmt.Fprintln(out, "  --assignee <user_id>   filter by assignee user ID")
 	_, _ = fmt.Fprintln(out, "  --collection <id>      filter by collection short_id or ID")
@@ -476,12 +476,12 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 	}
 
 	rows, err := sqlite.QueryTSV(fmt.Sprintf(
-		"SELECT id,short_id,title,description,status,priority,due_at,scheduled_at,estimated_minutes,rollover_enabled,skip_weekends,completed_at,archived_at,created_by,updated_by,created_at,updated_at,version FROM tasks WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;",
+		"SELECT id,short_id,title,description,status,priority,due_at,scheduled_at,estimated_minutes,rollover_enabled,skip_weekends,started_at,completed_at,archived_at,created_by,updated_by,created_at,updated_at,version FROM tasks WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;",
 		db.Quote(*target), db.Quote(*target)))
 	if err != nil {
 		return err
 	}
-	if len(rows) == 0 || len(rows[0]) < 18 {
+	if len(rows) == 0 || len(rows[0]) < 19 {
 		return fmt.Errorf("unknown task %s", *target)
 	}
 	r := rows[0]
@@ -522,11 +522,11 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 			"description":       r[3],
 			"status":            r[4],
 			"priority":          r[5],
-			"created_by":        r[13],
-			"updated_by":        r[14],
-			"created_at":        r[15],
-			"updated_at":        r[16],
-			"version":           parseIntDefault(r[17], 1),
+			"created_by":        r[14],
+			"updated_by":        r[15],
+			"created_at":        r[16],
+			"updated_at":        r[17],
+			"version":           parseIntDefault(r[18], 1),
 		}
 		if r[6] != "" {
 			task["due_at"] = r[6]
@@ -544,10 +544,13 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 			task["skip_weekends"] = true
 		}
 		if r[11] != "" {
-			task["completed_at"] = r[11]
+			task["started_at"] = r[11]
 		}
 		if r[12] != "" {
-			task["archived_at"] = r[12]
+			task["completed_at"] = r[12]
+		}
+		if r[13] != "" {
+			task["archived_at"] = r[13]
 		}
 
 		assignees := make([]map[string]string, 0, len(assigneeRows))
@@ -589,6 +592,9 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "task %s\n", r[1])
 	_, _ = fmt.Fprintf(out, "title:       %s\n", r[2])
 	_, _ = fmt.Fprintf(out, "status:      %s\n", r[4])
+	if r[11] != "" {
+		_, _ = fmt.Fprintf(out, "started:     %s\n", r[11])
+	}
 	_, _ = fmt.Fprintf(out, "priority:    %s\n", r[5])
 	if r[3] != "" {
 		_, _ = fmt.Fprintf(out, "description: %s\n", r[3])
@@ -602,8 +608,8 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 	if r[8] != "" && r[8] != "0" {
 		_, _ = fmt.Fprintf(out, "estimate:    %s min\n", r[8])
 	}
-	_, _ = fmt.Fprintf(out, "created:     %s by %s\n", r[15], r[13])
-	_, _ = fmt.Fprintf(out, "updated:     %s by %s\n", r[16], r[14])
+	_, _ = fmt.Fprintf(out, "created:     %s by %s\n", r[16], r[14])
+	_, _ = fmt.Fprintf(out, "updated:     %s by %s\n", r[17], r[15])
 	if len(assigneeRows) > 0 {
 		names := make([]string, 0, len(assigneeRows))
 		for _, a := range assigneeRows {
@@ -818,7 +824,7 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 		extra = ", archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 	}
 	if status == "open" {
-		extra = ", completed_at = NULL, archived_at = NULL"
+		extra = ", completed_at = NULL, archived_at = NULL, started_at = NULL"
 	}
 	sql := fmt.Sprintf("UPDATE tasks SET status=%s, updated_by=%s, version=version+1 %s WHERE id=%s AND deleted_at IS NULL;",
 		db.Quote(status), db.Quote(p.UserID), extra, db.Quote(taskID))
