@@ -43,6 +43,67 @@ func printCollectionHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "  show     show detail for a single collection")
 	_, _ = fmt.Fprintln(out, "  link     link parent -> child collection")
 	_, _ = fmt.Fprintln(out, "  unlink   remove parent -> child link")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "run 'dooh collection <subcommand> --help' for flags and examples")
+	return nil
+}
+
+func printCollectionAddHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh collection add --name <string> [flags]")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "create a new collection (project, goal, area, tag, etc.)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --name <string>   collection name")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "optional:")
+	_, _ = fmt.Fprintln(out, "  --kind <string>   project|goal|area|tag|class|custom (default: project)")
+	_, _ = fmt.Fprintln(out, "  --color <hex>     hex color code (default: random from palette)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh --json collection add --name \"Pollinator Patrol\" --kind project")
+	_, _ = fmt.Fprintln(out, "  dooh --json collection add --name \"Q1 Goal\" --kind goal --color \"#4D96FF\"")
+	return nil
+}
+
+func printCollectionListHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh collection list")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "list all collections (projects, goals, areas, tags, etc.)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "example:")
+	_, _ = fmt.Fprintln(out, "  dooh --json collection list")
+	return nil
+}
+
+func printCollectionShowHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh collection show --id <id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "show collection details including member tasks, parent collections, and child collections")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   collection short_id or full ID (e.g. c_abc123)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "example:")
+	_, _ = fmt.Fprintln(out, "  dooh --json collection show --id c_abc123")
+	return nil
+}
+
+func printCollectionLinkHelp(verb string, out io.Writer) error {
+	_, _ = fmt.Fprintf(out, "usage: dooh collection %s --parent <id> --child <id>\n", verb)
+	_, _ = fmt.Fprintln(out, "")
+	if verb == "link" {
+		_, _ = fmt.Fprintln(out, "create a parent -> child hierarchy between two collections")
+		_, _ = fmt.Fprintln(out, "note: cycle detection prevents circular collection hierarchies")
+	} else {
+		_, _ = fmt.Fprintln(out, "remove a parent -> child hierarchy link between two collections")
+	}
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --parent <id>   parent collection short_id or full ID")
+	_, _ = fmt.Fprintln(out, "  --child <id>    child collection short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintf(out, "example:\n  dooh collection %s --parent c_abc123 --child c_xyz789\n", verb)
 	return nil
 }
 
@@ -55,6 +116,9 @@ func runCollectionAdd(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printCollectionAddHelp(out)
+		}
 		return err
 	}
 	if *name == "" {
@@ -105,6 +169,9 @@ func runCollectionList(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printCollectionListHelp(out)
+		}
 		return err
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
@@ -154,6 +221,9 @@ func runCollectionShow(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printCollectionShowHelp(out)
+		}
 		return err
 	}
 	if *target == "" {
@@ -273,6 +343,10 @@ func runCollectionShow(rt runtime, args []string, out io.Writer) error {
 }
 
 func runCollectionLink(rt runtime, args []string, out io.Writer, add bool) error {
+	verb := "unlink"
+	if add {
+		verb = "link"
+	}
 	fs := flag.NewFlagSet("collection link", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	parent := fs.String("parent", "", "parent collection id or short id")
@@ -280,6 +354,9 @@ func runCollectionLink(rt runtime, args []string, out io.Writer, add bool) error
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printCollectionLinkHelp(verb, out)
+		}
 		return err
 	}
 	if *parent == "" || *child == "" {
