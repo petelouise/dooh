@@ -2,6 +2,45 @@
 
 This guide is for an AI coding agent operating `dooh` through CLI only.
 
+## Auth model
+
+Every mutating command requires API key auth. Actor identity is derived from the key,
+never from a role string alone.
+
+- **Agent mode** (`DOOH_MODE=agent`): requires `DOOH_AI_KEY` env var; rejects
+  `--api-key` flag. This is the correct mode for AI CLI use.
+- **Human mode** (`DOOH_MODE=human`): requires explicit `--api-key` flag; does not fall
+  back to env vars.
+
+## Scope model
+
+| Scope | Agent | Human |
+|---|---|---|
+| `tasks:read` | yes | yes |
+| `tasks:write` | yes | yes |
+| `tasks:delete` | yes | yes |
+| `collections:read` | yes | yes |
+| `collections:write` | yes | yes |
+| `export:run` | yes | yes |
+| `users:admin` | no | yes |
+| `keys:admin` | no | yes |
+| `system:rollback` | no | yes |
+
+Lifecycle admin (creating/revoking keys, creating users) is human-only by default.
+Do not attempt these unless explicitly instructed with a system override.
+
+## Exit codes
+
+```text
+0  success
+1  general error
+2  usage/validation error (bad flags, missing required flag)
+3  auth failure
+4  not found
+5  permission denied
+6  conflict/precondition failure (dependency cycle, open blockers, etc.)
+```
+
 ## Machine-readable output
 
 All data commands support `--json` as a global flag for structured output:
@@ -61,7 +100,7 @@ Required:
 ```bash
 DOOH_AI_KEY=<AI_KEY>
 ```
-Optional for dev channel only:
+Optional — override home dir for channel isolation:
 ```bash
 DOOH_HOME=~/.config/dooh-dev
 ```

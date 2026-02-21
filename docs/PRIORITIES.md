@@ -292,9 +292,14 @@ star; these are the immediate next steps ordered by impact.
 
 **P0 — Do before anything else**
 
-- **TUI stability baseline** (see TUI_ROADMAP.md P0): footer visibility, full-width
-  background fill, column alignment, flicker elimination. The TUI is nearly there but
-  not yet trustworthy at all terminal widths. Fix this before extending the TUI.
+- **TUI stability baseline**: footer visibility, full-width background fill, column
+  alignment, flicker elimination. The TUI is nearly there but not yet trustworthy at
+  all terminal widths. Fix this before extending the TUI. Implementation approach: move
+  all line composition to plain-text segments first, apply style last; add ANSI-aware
+  width helpers (`visibleWidth`, `truncateVisible`, `padVisible`); reserve fixed layout
+  regions (header / body / footer); render only after `WindowSizeMsg`, reflow on resize
+  only. Acceptance: columns align at 80/100/140 widths, footer always visible, top bar
+  spans full width, no idle flicker.
 
 - **`in-progress` task status**: schema migration, `task start` CLI command, TUI icon,
   event attribution. Small scope, high leverage for pair visibility.
@@ -346,8 +351,9 @@ star; these are the immediate next steps ordered by impact.
 
 **P3 — Polish and completeness**
 
-- **Dual binary → single binary**: update install script, update documentation, add
-  `--home` flag. Low risk, meaningful simplification.
+- **Single binary implementation**: remove `dooh-dev` build target; add `--home` flag;
+  update install script to set up `DOOH_HOME`-based dev alias. Low risk, meaningful
+  simplification. Documentation already reflects the target state.
 
 - **Theme redesign** (TUI_ROADMAP P4): semantic tokens, contrast validation, 2 more
   light themes.
@@ -562,7 +568,7 @@ discoverability.
 | P2 | Priority semantics: define and document `now/soon/later` | Clarity |
 | P2 | Filter token syntax: placeholder + help hint in TUI | Discoverability |
 | P2 | TUI sort controls: `o` key, sort chip, quoted filter tokens | UX improvement |
-| P3 | Dual binary → single binary with `--home` flag | Simplification |
+| P3 | Single binary: remove `dooh-dev` target, add `--home` flag | Simplification |
 | P3 | Theme redesign: semantic tokens + contrast tests | Polish |
 | P3 | Scheduling intelligence: rollover, today CLI, estimates | Design shift |
 | P3 | Batch operations on status-change commands | Feature |
@@ -571,3 +577,42 @@ discoverability.
 | P3 | `whoami`/`context show`/`env` boundary clarification | Clarity |
 | P4 | `export site` bundled HTML viewer | Feature |
 | P4 | Bubble Tea viewport + command palette | Polish |
+
+---
+
+## TUI Implementation Notes
+
+Key architectural decisions for anyone working on TUI items above.
+
+### Rendering approach (applies to all TUI work)
+
+- All line composition: build plain-text segments first, apply Lip Gloss styles last.
+  Never measure the width of an already-styled string — use ANSI-aware helpers.
+- Reserved layout regions: **header** (title + filter bar + tabs + column headers),
+  **body** (viewport-managed rows), **footer** (selected summary + hotkey hints).
+  Each region is allocated before rendering; body gets what's left.
+- Re-render only on `WindowSizeMsg` or model mutations — never on a timer.
+
+### Filtering and sorting (P1/P2)
+
+- Filter input parses a token AST: free-text fuzzy terms + typed tokens (`#tag`,
+  `~area`, `^goal`, `@assignee`, `!overdue`, `!nodue`, `!todaydue`). Tokens combine
+  with implicit AND. Quoted multi-word: `#"Deep Work"`.
+- Parsed tokens render as chips in the top bar. Free text shows as-is.
+- Sort mode (`o` key) cycles: default → priority → scheduled. Active sort shows as a
+  chip. Sort changes order without breaking expand/selection state.
+
+### Theme system (P3)
+
+- Replace ad-hoc palette values with semantic tokens only: `text`, `muted`, `accent`,
+  `success`, `warn`, `danger`, `chart1–4`.
+- All shipped themes must pass minimum contrast ratio checks. Add a `theme lint`
+  internal helper. No hardcoded 256-color fallbacks where semantic tokens exist.
+
+### Bubble Tea upgrade path (P4)
+
+- Current Bubble Tea use is mostly event loop + key handling. Bigger gains come from
+  adopting Bubbles primitives for viewport and interactive controls (text inputs,
+  list navigation). Do that only after P0 baseline is stable.
+- Keep `--renderer legacy` as a fallback throughout. Feature-flag experimental UI
+  behind `--ui-experimental` initially.

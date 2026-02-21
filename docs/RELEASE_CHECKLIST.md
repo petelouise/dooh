@@ -32,16 +32,10 @@ Use this checklist before cutting each release.
 - Attach binaries + checksums to release.
 
 ## 5) Install path clarity
-- Stable binary name: `dooh`.
-- Dev binary name: `dooh-dev`.
-- Stable and dev config must not collide:
-  - stable: `~/.config/dooh`
-  - dev: `~/.config/dooh-dev`
-- Optional override for channel isolation: `DOOH_HOME`.
-
-> **Note (P3):** The dual-binary model is planned for deprecation. The target is a single
-> `dooh` binary with channel isolation via `DOOH_HOME` or `--home`. See `docs/PRIORITIES.md`
-> (Big Change 5). Until then, verify both binaries resolve to distinct config/db paths.
+- Single binary: `dooh`.
+- Channel isolation via `DOOH_HOME` (default: `~/.config/dooh`).
+- Dev channel: `DOOH_HOME=~/.config/dooh-dev dooh ...` or shell alias.
+- Stable and dev config/db paths must not collide — verify with `dooh context show`.
 
 ## 6) Data safety
 - Stable channel must not use demo seed data.
@@ -57,6 +51,6 @@ Use this checklist before cutting each release.
 - Verify events include actor attribution.
 
 ## 8) Docs and onboarding
-- README quickstart stable/dev validated copy-paste.
+- README quickstart validated copy-paste.
 - AI guide updated (`docs/AI_CLI_PLAYBOOK.md`).
-- Channel setup doc updated (`docs/SETUP_CHANNELS.md`).
+- Priorities doc current (`docs/PRIORITIES.md`).
