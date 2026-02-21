@@ -43,7 +43,7 @@ project  ←— must have at least one parent (area, goal, or both)
   └── task
 
 task   ←— can belong to any of: project, goal, area
-  └── subtask   (task-to-task relationship; not a collection)
+  └── checklist item   (ordered text + checkbox; not a full task)
 
 tag    ←— can be applied to any collection kind, or directly to a task
            cascades down: tagging a project implicitly tags its tasks
@@ -63,9 +63,14 @@ In plain language:
 - Direct task membership is allowed at every level. A task can live directly in an area,
   a goal, or a project without needing intermediate containers. "Pick up dry cleaning"
   belongs to area "home" without needing a project.
+- Checklist items are lightweight steps within a task — plain text plus a checked state.
+  They are not tasks. They have no priority, due date, assignee, or collection membership.
+  If a step within a task needs any of those things, it should be a task in a project,
+  not a checklist item.
 - Tags cascade. A tag applied to a goal applies implicitly to all its projects and all
   their tasks. A tag applied to a project applies to all its tasks. Tags on tasks are
-  local only.
+  local only. Inherited tags are displayed distinctly (e.g. `billing (via Q1 Project)`)
+  rather than appearing as directly applied.
 
 ---
 
@@ -137,10 +142,76 @@ CREATE TABLE collections (
 );
 -- migrate rows, drop old table
 
--- 2. No structural schema changes needed for the hierarchy itself.
+-- 2. No structural schema changes needed for the collection hierarchy itself.
 --    collection_links and collection_closure already support multiple parents.
 --    The rules are enforced at the application layer.
+
+-- 3. Replace task_subtasks with task_checklist (see section below)
 ```
+
+---
+
+## Task checklist model
+
+Subtasks in the current schema are full tasks linked via a `task_subtasks` join table.
+This creates a philosophical incoherence: a subtask with its own priority, due date,
+assignees, and collection membership is not meaningfully different from a task. The
+distinction collapses. The data model has tasks all the way down with no clear boundary.
+
+**The decision:** subtasks are replaced by lightweight checklist items — ordered text
+plus a checked state, nothing more. If a step within a task needs its own scheduling,
+assignment, or organizational context, it is a task in a project, not a checklist item.
+The hierarchy handles this; the checklist does not need to.
+
+This also clarifies the four-level structure of the whole system:
+
+```
+area / goal
+  └── project   (a coordinated body of work)
+        └── task   (a unit of work owned by one actor)
+              └── checklist item   (a step; just text + ☐/☑)
+```
+
+Each level is meaningfully distinct. Nothing bleeds upward.
+
+**Schema migration:**
+
+```sql
+-- Drop the task-to-task relationship table
+DROP TABLE task_subtasks;
+
+-- Add the checklist table
+CREATE TABLE task_checklist (
+  id          TEXT PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id),
+  text        TEXT NOT NULL,
+  checked     INTEGER NOT NULL DEFAULT 0 CHECK(checked IN (0,1)),
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE INDEX idx_task_checklist_task ON task_checklist(task_id, position);
+```
+
+**Auto-complete behavior:** when all checklist items on a task are checked, the task
+may auto-complete (matching the existing behavior for the subtask model). This is
+simpler to query — count unchecked rows rather than querying child task statuses.
+
+**CLI changes:**
+- Remove: `task subtask add`, `task subtask remove`
+- Add: `task checklist add --id <task> --text "..."`
+- Add: `task checklist check --id <task> --item <item_id>`
+- Add: `task checklist uncheck --id <task> --item <item_id>`
+- Add: `task checklist remove --id <task> --item <item_id>`
+- `task show` should include checklist items in its output
+
+**TUI changes:** expanded task card shows checklist items as `☐ step text` / `☑ step
+text` lines after the description. Checking/unchecking from the TUI is a natural write
+operation to add alongside quick-add and complete.
+
+**Blocking relationships** (`task_dependencies`) remain at the task level. Checklist
+items do not block each other — they are steps, not dependencies.
 
 ---
 
@@ -191,19 +262,24 @@ dooh --json collection show --id <id> # drill into a specific collection
 
 ---
 
-## Open questions (not yet resolved)
+## Resolved design decisions
 
-**Can a project belong to multiple goals?** The model allows it (multiple parents of
-kind `goal`). Useful if a single project serves two distinct outcomes. Probably fine to
-allow; validation should warn if a project has more than two or three goal parents, as
-that often signals the project is too broad.
+**Can a project belong to multiple goals?** Yes, with no restriction or warnings. A
+project that genuinely serves two distinct outcomes should express that. The system does
+not try to enforce that projects have a single purpose; the pair is responsible for
+noticing when a project is overloaded. Show all goal parents clearly when displaying a
+project so the dual membership is visible.
 
-**Can goals belong to areas?** The model says no — goals are cross-cutting. But some
-teams/people want to say "my work goals" vs. "my personal goals." A compromise: allow
-tagging goals with areas (`tag` semantics) without making it a containment relationship.
-This keeps the hierarchy clean while allowing the label.
+**Can goals belong to areas?** No. Goals are cross-cutting by definition — "get healthy"
+is not a home goal or a work goal. If a user wants to categorize goals by domain (work
+goals vs. personal goals), use goal nesting: create a permanent top-level goal "Work"
+or "Personal" and nest domain-specific goals under it. Do not allow areas to contain
+goals or goals to be tagged with areas as a containment shortcut — that creates two
+channels between the axes and lets them contradict each other.
 
-**Should `tag` cascading be explicit or implicit?** Current proposal: implicit (the
-query layer computes it). Alternative: store tag inheritance explicitly in a separate
-table (like `collection_closure`). Implicit is simpler to implement; explicit is faster
-to query and easier to audit. Defer until tag query performance becomes an issue.
+**Should tag cascading be explicit or implicit?** Compute implicitly at query time via
+the closure table; display inherited tags distinctly in the UI. Do not materialize
+cascade as additional tag records. "Billing (via Q1 Project)" in the expanded task card
+is more honest than showing `billing` as if it were directly applied, and requires no
+extra storage or event noise. Revisit only if tag query performance becomes a real issue
+at scale (unlikely for a single-user SQLite tool).

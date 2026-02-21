@@ -138,11 +138,13 @@ both top-level, not one nested inside the other.
 
 ```
 area    top-level only; cannot belong to any other collection
+          └── project, or task directly
 goal    top-level, or nested under another goal (year > quarter)
           └── goal, project, or task directly
 project must have ≥1 parent (area, goal, or both)
           └── task
 task    can directly belong to: project, goal, or area
+          └── ☐ checklist item   (text + checked; not a full task)
 tag     applies to any collection or task; cascades down to member tasks
 ```
 
@@ -225,6 +227,42 @@ is what the documentation leads with.
 
 ---
 
+### 8. Replace subtasks with a task checklist
+
+The current subtask model — full tasks linked via a `task_subtasks` join table — creates
+a hierarchy that collapses on itself. A subtask with its own priority, due date, assignee,
+and collection membership is not meaningfully different from a task. The word "subtask"
+implies simplicity but the implementation delivers full task complexity. There is no clear
+line between a task and its subtasks, and the four-level structure of the system
+(area/goal → project → task → step) loses its bottom level to ambiguity.
+
+**The shift:** subtasks become a lightweight checklist on a task. Text plus a checked
+state. Nothing more.
+
+```
+area / goal
+  └── project   (a body of work)
+        └── task   (a unit of work)
+              └── ☐ checklist item   (a step; just text + checked state)
+```
+
+If a step needs its own due date, assignee, or collection membership, it is not a
+checklist item — it is a task in a project. The hierarchy already handles complex
+work decomposition. The checklist handles simple ordered steps.
+
+**Schema:** drop `task_subtasks`, add `task_checklist` (`id`, `task_id`, `text`,
+`checked`, `position`). See `docs/COLLECTION_MODEL.md` for the full migration.
+
+**CLI:** replace `task subtask add/remove` with `task checklist add/check/uncheck/remove`.
+
+**TUI:** expanded task card shows `☐ step` / `☑ step` lines. Checking items from the
+TUI is a natural first write operation alongside quick-add and complete.
+
+**Auto-complete:** when all checklist items are checked, the parent task may
+auto-complete — simpler to query than the current child-task-status approach.
+
+---
+
 ### 7. Build the scheduling intelligence the schema promises
 
 The schema has `rollover_enabled`, `skip_weekends`, `scheduled_at`, and
@@ -275,6 +313,10 @@ star; these are the immediate next steps ordered by impact.
 
 - **`urls` field on tasks**: schema migration, `task add --url`, `task update --url`,
   TUI expanded card display. Remove `groups` from TUI in the same pass.
+
+- **Subtask → checklist migration**: drop `task_subtasks`, add `task_checklist`,
+  replace `task subtask` CLI commands with `task checklist`, update TUI expanded card
+  to show `☐/☑` items. See `docs/COLLECTION_MODEL.md` for schema.
 
 **P2 — Important, not urgent**
 
@@ -483,6 +525,7 @@ discoverability.
 | P1 | `dooh log`: beautiful event stream viewer | Design shift |
 | P1 | TUI quick-add (`n` key) | Design shift |
 | P1 | `urls` field on tasks; remove `groups` from TUI | Feature + cleanup |
+| P1 | Subtask → checklist migration (drop `task_subtasks`, add `task_checklist`) | Design shift |
 | P2 | "Since you were away" TUI view | Design shift |
 | P2 | Collection hierarchy navigation (breadcrumb + Left key) | Design shift |
 | P2 | `dooh init` interactive setup command | UX improvement |
