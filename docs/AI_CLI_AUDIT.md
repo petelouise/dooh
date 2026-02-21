@@ -31,7 +31,7 @@ Scope: CLI interface usability from an AI coding agent's perspective
 ## Current Command Inventory
 
 ### All commands available:
-```
+```text
 dooh version
 dooh config show|init
 dooh db init
@@ -55,7 +55,7 @@ dooh tui
 ```
 
 ### Global flags (apply to all commands):
-```
+```text
 --profile <name>   select config profile (default, human, ai)
 --config <path>    override config file path
 --json             output machine-readable JSON
@@ -63,7 +63,7 @@ dooh tui
 ```
 
 ### Exit codes:
-```
+```text
 0  success
 1  general error
 2  usage/validation error (bad flags, missing required flag)

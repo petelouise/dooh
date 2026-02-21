@@ -25,11 +25,11 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 	case "update":
 		return runTaskUpdate(rt, args[1:], out)
 	case "complete":
-		return runTaskStatus(rt, args[1:], out, "completed", "task.completed")
+		return runTaskStatus(rt, args[1:], out, "completed", "task.completed", "complete")
 	case "reopen":
-		return runTaskStatus(rt, args[1:], out, "open", "task.reopened")
+		return runTaskStatus(rt, args[1:], out, "open", "task.reopened", "reopen")
 	case "archive":
-		return runTaskStatus(rt, args[1:], out, "archived", "task.archived")
+		return runTaskStatus(rt, args[1:], out, "archived", "task.archived", "archive")
 	case "block":
 		return runTaskBlock(rt, args[1:], out, true)
 	case "unblock":
@@ -774,7 +774,7 @@ func runTaskDelete(rt runtime, args []string, out io.Writer) error {
 	return nil
 }
 
-func runTaskStatus(rt runtime, args []string, out io.Writer, status string, eventName string) error {
+func runTaskStatus(rt runtime, args []string, out io.Writer, status string, eventName string, verb string) error {
 	fs := flag.NewFlagSet("task status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	target := fs.String("id", "", "task id or short id")
@@ -782,7 +782,7 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return printTaskStatusHelp(status, out)
+			return printTaskStatusHelp(verb, out)
 		}
 		return err
 	}
