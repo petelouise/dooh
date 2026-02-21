@@ -15,7 +15,7 @@ func ExportSite(sqlite db.SQLite, outDir string) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	tasks, err := sqlite.QueryTSV("SELECT short_id,title,status,priority,COALESCE(due_at,''),COALESCE(scheduled_at,''),updated_at FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
+	tasks, err := sqlite.QueryTSV("SELECT short_id,title,status,priority,COALESCE(due_at,''),COALESCE(scheduled_at,''),updated_at,COALESCE(started_at,'') FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC;")
 	if err != nil {
 		return err
 	}
@@ -30,10 +30,10 @@ func ExportSite(sqlite db.SQLite, outDir string) error {
 
 	taskOut := make([]map[string]string, 0, len(tasks))
 	for _, r := range tasks {
-		if len(r) < 7 {
+		if len(r) < 8 {
 			continue
 		}
-		taskOut = append(taskOut, map[string]string{
+		task := map[string]string{
 			"id":           r[0],
 			"title":        r[1],
 			"status":       r[2],
@@ -41,7 +41,11 @@ func ExportSite(sqlite db.SQLite, outDir string) error {
 			"due_at":       r[4],
 			"scheduled_at": r[5],
 			"updated_at":   r[6],
-		})
+		}
+		if r[7] != "" {
+			task["started_at"] = r[7]
+		}
+		taskOut = append(taskOut, task)
 	}
 
 	collectionOut := make([]map[string]string, 0, len(collections))
