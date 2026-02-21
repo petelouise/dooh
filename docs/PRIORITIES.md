@@ -120,31 +120,51 @@ a `started_at` timestamp column) and updates to the TUI, CLI, and export.
 
 ---
 
-### 4. Let the collection hierarchy drive navigation
+### 4. Redesign the collection taxonomy and let the hierarchy drive navigation
 
-The `collection_closure` table encodes a full ancestor/descendant tree across the
-collection hierarchy. This is a significant piece of infrastructure that is completely
-invisible in the navigation. The TUI has five flat views numbered 1–5. The collection
-hierarchy should be the navigation, not a filter facet.
+The collection system has two problems that need to be solved together: the taxonomy
+is underspecified (four meaningful kinds plus two undefined catch-alls), and the
+navigation doesn't use the hierarchy that's already in the data.
 
-**The shift:** the TUI's primary navigation axis is the collection tree, not the view
-tabs.
+**The taxonomy decision** (see `docs/COLLECTION_MODEL.md` for full reasoning and
+implementation detail):
 
-**Concrete design:**
+Four kinds, no others: `area`, `goal`, `project`, `tag`. Remove `class` and `custom`.
 
-- Entering a project from the project view (current behavior) is the right primitive.
-  Extend it: entering a goal shows that goal's projects; entering a project shows its
-  areas; entering an area shows its tasks. Each drill-in scopes the view, and the scope
-  chip in the filter bar shows the path (`Goal > Project > Area`).
-- Add breadcrumb navigation: `Left` goes up one level in the hierarchy.
-- The numbered views (`1`–`5`) become view-mode shortcuts within the current scope,
-  not global scope-changers. From inside a project, `1` shows that project's tasks,
-  `2` shows its progress, etc.
-- Tab order in the header should reflect this: scope is the outermost dimension,
-  view mode is the inner dimension.
+The containment rules reflect that areas and goals are fundamentally different things —
+areas are *where and when* (life domains: home, work, school), goals are *why*
+(outcomes: "launch Q2 product", "run a marathon"). They are orthogonal organizing axes,
+both top-level, not one nested inside the other.
 
-This does not require new data — the collection_closure query already supports it.
-It is a navigation redesign, not a data redesign.
+```
+area    top-level only; cannot belong to any other collection
+goal    top-level, or nested under another goal (year > quarter)
+          └── goal, project, or task directly
+project must have ≥1 parent (area, goal, or both)
+          └── task
+task    can directly belong to: project, goal, or area
+tag     applies to any collection or task; cascades down to member tasks
+```
+
+A project can have both a goal parent ("serves this outcome") and an area parent ("lives
+in this domain"). This is the normal case for substantive work. The goal-project
+relationship is containment, not a special link type — drilling into a goal shows its
+projects.
+
+**The navigation shift:** the TUI's primary axis is the collection tree, not numbered
+flat views.
+
+- Two root axes in the TUI: areas and goals. Both accessible from the top level.
+- Entering an area or goal scopes the view; entering a project scopes further.
+- The breadcrumb in the filter bar shows the path taken (`Work > Product redesign` or
+  `Reduce churn > Product redesign`). Both are valid paths to the same project.
+- `Left` goes up one level in the breadcrumb.
+- Numbered view modes (`1`–`5`) apply *within* the current scope, not globally.
+- The TUI scope state (`ScopeKind`, `ScopeID`, `ScopeName`) needs a `ScopePath` field
+  to support breadcrumb rendering and `Left` navigation.
+
+The `collection_closure` table already supports multiple parents; the application layer
+needs kind-aware constraint enforcement added to `collection link`.
 
 ---
 
