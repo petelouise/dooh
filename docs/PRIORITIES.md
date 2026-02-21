@@ -36,36 +36,23 @@ Most of these are not true yet. This document describes how to get there.
 
 ---
 
-## Proposed Big Changes
+## Design Shifts
 
-These are not feature requests — they are design shifts. Some require rethinking existing
-interfaces. All are worth the disruption.
+These are not feature requests — they are design decisions that shape everything below.
 
 ---
 
-### 1. Make the TUI writable
+### 1. The TUI stays read-only (for now)
 
-The TUI is currently read-only. It is beautiful and well-designed for browsing, but it
-enforces a workflow split that cuts against the tool's own premise: humans look here,
-then switch to a different interface (the CLI) to act. This context-switch is small but
-persistent, and it makes the TUI feel like a dashboard rather than a workspace.
+The TUI is the human's reading surface. The CLI is the action layer — for both humans
+and agents. This is a deliberate decision, not a gap. TUI write features are a real
+future direction but are not being implemented now. See the Deferred section.
 
-**The shift:** treat the TUI as the primary interface for humans. The CLI becomes the
-scripting layer — the interface for agents and for automation. Humans who want to work
-in the terminal should not need to leave the TUI to manage tasks.
-
-**Minimum writable surface for a first pass:**
-- `n` to quick-add a task (title + priority; opens a two-field inline form, not a modal)
-- `x` or `Enter` (when on a task row) to complete
-- `e` to open an inline editor for the selected task's title and priority
-- `d` to archive
-
-This is not a full TUI editor — it is enough to close the loop without context-switching.
-Description, URLs, and relationships remain CLI territory for now.
-
-**Risk:** write interactions in a TUI that already has rich keybindings require careful
-modal design. The existing filter interactions (`f`, `g`, `a`, etc.) set a good precedent.
-Follow the same pattern: a key opens an input mode, `Enter` commits, `Esc` cancels.
+The orientation principle still applies: every design decision in the TUI should ask
+"what would a human want to do from here?" not just "what information is useful to show?"
+The most important improvements to the read experience are making the pair dynamic
+visible (actor glyph, log view) and making navigation feel like drilling into a hierarchy
+rather than switching between flat numbered views.
 
 ---
 
@@ -170,13 +157,13 @@ needs kind-aware constraint enforcement added to `collection link`.
 
 ---
 
-### 5. Kill the dual binary
+### 5. One binary, configured by `DOOH_HOME`
 
 `dooh` and `dooh-dev` are separate binaries produced from the same codebase. The
 isolation they provide (separate config dirs, separate databases) is real and useful.
 The mechanism (two binaries) is unnecessary.
 
-**The shift:** one binary, configured by `DOOH_HOME` or `--home`.
+**The target:** one binary, configured by `DOOH_HOME` or `--home`.
 
 ```bash
 # stable (current default)
@@ -255,8 +242,7 @@ work decomposition. The checklist handles simple ordered steps.
 
 **CLI:** replace `task subtask add/remove` with `task checklist add/check/uncheck/remove`.
 
-**TUI:** expanded task card shows `☐ step` / `☑ step` lines. Checking items from the
-TUI is a natural first write operation alongside quick-add and complete.
+**TUI:** expanded task card shows `☐ step` / `☑ step` lines (read-only display).
 
 **Auto-complete:** when all checklist items are checked, the parent task may
 auto-complete — simpler to query than the current child-task-status approach.
@@ -285,104 +271,144 @@ behavior visible to the user — they are stored and forgotten.
 
 ---
 
-## Immediate Priorities
+## Implementation Plan
 
-What to work on now, given the above direction. The big changes above are the north
-star; these are the immediate next steps ordered by impact.
+Work through these in priority order. Within P0 and P1, some items are parallel — noted
+explicitly below. The single hard constraint is **TUI stability gates all TUI feature
+work**. Schema and CLI changes are independent and can land while TUI stabilization is
+in progress; keep them in separate PRs.
 
-**P0 — Do before anything else**
+---
 
-- **TUI stability baseline**: footer visibility, full-width background fill, column
-  alignment, flicker elimination. The TUI is nearly there but not yet trustworthy at
-  all terminal widths. Fix this before extending the TUI. Implementation approach: move
-  all line composition to plain-text segments first, apply style last; add ANSI-aware
-  width helpers (`visibleWidth`, `truncateVisible`, `padVisible`); reserve fixed layout
-  regions (header / body / footer); render only after `WindowSizeMsg`, reflow on resize
-  only. Acceptance: columns align at 80/100/140 widths, footer always visible, top bar
-  spans full width, no idle flicker.
+### P0 — Do first; nothing else starts until these are done
 
-- **`in-progress` task status**: schema migration, `task start` CLI command, TUI icon,
-  event attribution. Small scope, high leverage for pair visibility.
+**TUI stability baseline**
 
-**P1 — High value, moderate effort**
+Footer visibility, full-width background fill, column alignment, flicker elimination.
+The TUI is nearly there but not yet trustworthy at all terminal widths.
 
-- **Actor glyph in task rows**: surface `client_type` from the most recent event per
-  task in the task list query. Add one-character column. No new data, new presentation.
+Implementation: move all line composition to plain-text segments first, apply style
+last; add ANSI-aware width helpers (`visibleWidth`, `truncateVisible`, `padVisible`);
+reserve fixed layout regions (header / body / footer); render only after `WindowSizeMsg`,
+reflow on resize only.
 
-- **`dooh log` command**: format the event stream beautifully. Pull from `event list`
-  data, apply colors by actor type, show event kind and aggregate name. The hard part
-  is making it feel like `git log`, not like a database dump.
+Acceptance: columns align at 80/100/140 widths, footer always visible, top bar spans
+full width, no idle flicker.
 
-- **TUI quick-add** (`n` key): inline two-field form (title + priority cycle). Commit on
-  `Enter`. The pattern is already established by the filter input mode.
+**`in-progress` task status** _(parallel with TUI stability — CLI lands first)_
 
-- **`description` and `urls` fields on tasks**: schema migration (`tasks.description TEXT`,
-  `tasks.urls TEXT`), `task add --description --url` (repeatable), `task update --description
-  --url --clear-urls`, TUI expanded card display. Remove `groups` from TUI in the same pass.
+Schema migration: add `in_progress` to the status CHECK constraint, add `started_at`
+timestamp. New command: `task start --id <id>`. Event type: `task.started`. Export
+updated. TUI icon (◎ or ▶) and row ordering (in-progress floats to top) land once
+TUI stability is complete.
 
-- **Subtask → checklist migration**: drop `task_subtasks`, add `task_checklist`,
-  replace `task subtask` CLI commands with `task checklist`, update TUI expanded card
-  to show `☐/☑` items. See `docs/COLLECTION_MODEL.md` for schema.
+---
 
-**P2 — Important, not urgent**
+### P1 — After P0; CLI-first items can begin during P0
 
-- **"Since you were away" view** in TUI: tasks touched by the other actor since the
-  viewer's last event. Requires computing "last human event" and "last AI event"
-  timestamps.
+**Checklist migration** _(schema + CLI; no TUI dependency)_
 
-- **Collection hierarchy navigation**: breadcrumb path in filter bar, `Left` to go up
-  one scope level. The drill-in already works; add the return path.
+Drop `task_subtasks`. Add `task_checklist` table (see `docs/COLLECTION_MODEL.md` for
+schema). Replace `task subtask add/remove` CLI commands with `task checklist
+add/check/uncheck/remove`. Update `task show` output to include checklist items.
+TUI expanded card display (read-only `☐/☑` rows) follows once TUI stability holds.
 
-- **`dooh init`**: interactive first-time setup. Replace the documentation's manual
-  6-step sequence.
+**`description` and `urls` fields on tasks** _(schema + CLI; TUI display after P0)_
 
-- **Area view in TUI**: dedicated areas view with completion counts, `6` shortcut. Reuse
-  the progress-row loader used by project/goal views.
+Schema: `tasks.description TEXT NOT NULL DEFAULT ''` and `tasks.urls TEXT NOT NULL
+DEFAULT ''`. CLI: `task add --description --url` (repeatable), `task update
+--description --url --clear-urls`. TUI expanded card shows both fields; remove `groups`
+row from the card in the same pass.
 
-- **Priority semantics**: define and document `now`/`soon`/`later` with concrete guidance
-  (e.g., `now` = blocking something today, `soon` = committed this week, `later` = on the
-  radar). Add to `task add --help`, TUI expanded card, and README.
+**`dooh log` command** _(pure CLI; no TUI dependency)_
 
-- **Filter token syntax**: add a `#tag ~area @user …` placeholder to the TUI filter input
-  and a token syntax hint to the TUI help screen or expanded footer.
+A colorized event stream formatted like `git log --oneline`. Pulls from `event list`
+data; applies color by actor type (`client_type`); shows event kind and aggregate name.
+Default: last 40 events. Flags: `--actor human|ai`, `--type <event_type>`,
+`--since <timestamp>`. The hard part is making it feel fast and readable, not like a
+database dump.
 
-- **TUI sort controls**: `o` key cycles sort mode (priority → scheduled → default). Show
-  active sort as a chip in the top bar. Quoted multi-word filter tokens (`#"Deep Work"`).
+**Actor glyph in task rows** _(TUI; after P0 stable)_
 
-**P3 — Polish and completeness**
+Surface `client_type` from the most recent event per task in the task list query. Add a
+one-character column after the status icon: `H` or `A`, styled in the respective accent
+color. No new data — new presentation of data that already exists.
 
-- **Single binary implementation**: remove `dooh-dev` build target; add `--home` flag;
-  update install script to set up `DOOH_HOME`-based dev alias. Low risk, meaningful
-  simplification. Documentation already reflects the target state.
+---
 
-- **Theme redesign** (TUI_ROADMAP P4): semantic tokens, contrast validation, 2 more
-  light themes.
+### P2 — After P1 TUI work is solid
 
-- **Scheduling intelligence**: `dooh today` CLI command, rollover markers, estimate
-  summation in today view, skip-weekends forwarding.
+**Filter token syntax** _(small, low-risk TUI change; good first P2 item)_
 
-- **Batch operations** on status-change commands: accept repeated `--id` flags on
-  `task complete`, `task archive`, `task assign add`.
+Add a placeholder to the filter input (`#tag ~area @user …`) and a token syntax hint
+to the TUI help screen or expanded footer row. No new functionality — just surface what
+already works. Quoted multi-word tokens (`#"Deep Work"`) can land in the same pass.
 
-- **`dooh init`** non-interactive mode: `--name`, `--ai-key`, `--db` flags for
+**TUI sort controls**
+
+`o` key cycles sort mode: default → priority → scheduled. Active sort shows as a chip
+in the top bar. Sort changes row order without breaking expand/selection state.
+
+**Area view in TUI**
+
+Dedicated areas view accessible via the `6` shortcut. Shows areas with task completion
+counts. Reuses the progress-row loader used by the existing project/goal views. Entering
+an area row scopes the task list to that area.
+
+**Collection hierarchy navigation**
+
+Breadcrumb path in the filter bar showing the current scope path (`Work > Product
+redesign`). `Left` key goes up one level. The drill-in already works — this adds the
+return path. Requires extending `ScopeState` with a `ScopePath` slice.
+
+**"Since you were away" view** _(depends on actor glyph work from P1)_
+
+A TUI view showing tasks the non-current actor touched since the viewer's last event.
+"Last human event" timestamp drives what counts as "while you were away" for the human
+viewer. Key: `7` (or reassign once area view slot is confirmed).
+
+**`dooh init`**
+
+Interactive first-time setup: prompts for name, creates DB, creates human user and key,
+stores context. Detects `DOOH_AI_KEY` and offers to register the AI user in the same
+pass. See Design Shift 6 for the full flow.
+
+**Priority semantics**
+
+Define `now`/`soon`/`later` in `task add --help`, the TUI expanded task card, and the
+README:
+- `now`: actively blocking something or in flight today
+- `soon`: committed this week, not today
+- `later`: on the radar; revisit during weekly planning
+
+---
+
+### P3 — Cleanup and polish; no hard sequencing dependencies
+
+- **Single binary**: remove `dooh-dev` build target, add `--home` flag, update install
+  script to set up `DOOH_HOME`-based dev alias.
+- **Scheduling intelligence**: `dooh today` CLI command, rollover markers in TUI and CLI
+  output, estimate summation in today view, skip-weekends forwarding.
+- **Theme redesign**: replace ad-hoc palette values with semantic tokens; add contrast
+  validation; ship at least 2 light themes and 4 dark themes.
+- **Batch operations**: accept repeated `--id` flags on `task complete`, `task archive`,
+  `task assign add`.
+- **Outbox**: add `dooh outbox status` command, implement a consumer, or remove the table
+  and its accumulating undelivered rows.
+- **README**: lead with the setup script; move the manual 6-step sequence to an appendix.
+- **`whoami`/`context show`/`env` boundary**: make each command the authoritative source
+  for exactly one thing; add a one-line description to each command's output or `--help`.
+- **`dooh init` non-interactive mode**: `--name`, `--ai-key`, `--db` flags for
   script-driven setup.
 
-- **Outbox**: add `dooh outbox status` command showing pending/delivered/failed counts,
-  implement a consumer, or remove the table and its accumulating rows.
+---
 
-- **README**: lead with the setup script; move the manual 6-step sequence to an appendix.
+### P4 — Nice to have; no timeline
 
-- **`whoami`/`context show`/`env` boundary clarification**: document what each command is
-  authoritative for; add a brief statement to each command's output or `--help`.
-
-**P4 — Nice to have**
-
-- **`export site` bundled HTML viewer**: a single `index.html` that reads `tasks.json` and
-  `collections.json` with no build step and no external dependencies, making the export
-  immediately usable.
-
-- **Bubble Tea viewport + command palette**: full terminal resize support and a
-  command-palette overlay for discoverability.
+- **`export site` bundled HTML viewer**: a single `index.html` that reads `tasks.json`
+  and `collections.json` with no build step and no external dependencies.
+- **Bubble Tea viewport + command palette**: full viewport-managed body rendering and a
+  command-palette overlay (`:`) for discoverability. See TUI Implementation Notes.
 
 ---
 
@@ -395,16 +421,15 @@ tool's own goals. Ordered by severity.
 
 ### The TUI is a bystander
 
-The most important interface problem is not a bug or a missing feature. It is a design
-orientation. The TUI currently watches the pair work and reports on it. This is fine for
-a dashboard but wrong for a workspace. A human using dooh day-to-day will spend most of
-their time in the TUI — browsing tasks, checking project progress, planning the day —
-and then leave it every time they want to act. That break in flow is the interface's
-biggest friction point.
+The TUI currently watches the pair work and reports on it. This is fine for a dashboard
+but the wrong orientation for a workspace. The TUI is not becoming writable now — that
+is deliberately deferred — but the orientation principle matters even for read-only
+design: every decision should ask "what would a human want to do from here?" not just
+"what is useful to show?"
 
-The fix is making the TUI writable (see Proposed Big Change 1 above), but the
-orientation shift matters independently: every design decision in the TUI should ask
-"what would a human want to do from here?" not just "what information is useful to show?"
+The most immediate improvements are making the pair dynamic visible (actor glyph, log
+view) and making navigation feel like drilling into a hierarchy rather than switching
+numbered flat views. Both are achievable without write interactions.
 
 ---
 
@@ -439,7 +464,7 @@ the pair cannot maintain consistent priority discipline over time. A suggested d
 - **`later`**: on the radar, not scheduled. Review during weekly planning.
 
 This definition should appear in `dooh task add --help`, in the TUI footer or expanded
-task card, and in the README. _(See Priority Index: P2)_
+task card, and in the README. _(See Implementation Plan: P2)_
 
 ---
 
@@ -454,7 +479,7 @@ in the detail card do not know what it represents or how to populate it.
 
 Remove `groups` from the TUI detail card. If `class`-kind collections are genuinely
 useful, show them as `class:` with their own semantics defined. If they are not useful,
-remove the kind from the schema.
+remove the kind from the schema. _(Handled in the P1 `description`/`urls` pass.)_
 
 ---
 
@@ -468,21 +493,19 @@ shows hotkeys for view modes but not for filter tokens.
 
 At minimum: show a one-line placeholder in the filter input field (`#tag ~area @user …`),
 and add a token syntax hint to the TUI help screen (or the expanded footer row).
-_(See Priority Index: P2)_
+_(See Implementation Plan: P2)_
 
 ---
 
 ### `rollover_enabled` and `skip_weekends` are schema ghosts
 
 These fields exist on every task record. They represent real, useful scheduling behavior.
-But there is no CLI flag to set them during `task add` (only `task update` exposes them,
-if it does at all), no TUI indicator that a task has them enabled, and no visible effect
-— a task with `rollover_enabled=1` looks identical to one without it. They are promises
-the interface has not kept.
+But there is no CLI flag to set them during `task add`, no TUI indicator that a task has
+them enabled, and no visible effect. They are promises the interface has not kept.
 
-Either implement the scheduling behavior these fields imply (see Proposed Big Change 7),
-or remove them from the schema and the documentation. Invisible features are worse than
-missing features: they create false confidence and cluttered data.
+Either implement the scheduling behavior these fields imply (see Design Shift 8), or
+remove them from the schema. Invisible features are worse than missing features.
+_(See Implementation Plan: P3)_
 
 ---
 
@@ -496,8 +519,7 @@ records with no explanation.
 
 If the outbox is infrastructure for a future integration, document it clearly and add a
 `dooh outbox status` command that shows pending/delivered/failed counts. If no integration
-is planned for the foreseeable future, remove it — or at least add a periodic cleanup
-that marks old pending rows as failed with a clear reason.
+is planned for the foreseeable future, remove it. _(See Implementation Plan: P3)_
 
 ---
 
@@ -508,9 +530,9 @@ involves running `sqlite3` directly. The setup scripts hide this, but the docume
 leads with the manual steps before the scripts. A newcomer following the README will hit
 database concepts before they have created a single task.
 
-The fix is `dooh init` (see Proposed Big Change 6), but even before that, the README
-should lead with the setup script, not the manual steps. Manual steps belong in an
-appendix. _(See Priority Index: P2 / `dooh init`)_
+The fix is `dooh init` (see Design Shift 6), but even before that, the README should
+lead with the setup script, not the manual steps. Manual steps belong in an appendix.
+_(See Implementation Plan: P2 / `dooh init`)_
 
 ---
 
@@ -523,30 +545,21 @@ differences are not documented at the command level:
 - `context show`: what context overrides are persisted locally
 - `env`: what environment variables are currently resolved
 
-A user who runs all three will see repetition without understanding what each is
-authoritative for. With `--json`, this becomes especially confusing: which command's
-output is the right one to parse in a script?
-
 Clarify by making each command the canonical source for exactly one thing. `whoami`
-should be the identity oracle — the one command to run when you need to confirm who you
-are and what you are connected to. `context show` should focus on user-set overrides.
-`env` should focus on the raw environment resolution chain. Brief descriptions at the
-start of each command's output (or in `--help`) would resolve most of the confusion.
+should be the identity oracle. `context show` should focus on user-set overrides. `env`
+should focus on the raw environment resolution chain. _(See Implementation Plan: P3)_
 
 ---
 
 ### The `export site` output has no bundled viewer
 
 `dooh export site` produces clean, well-structured JSON. But there is no example HTML,
-no template, no reference viewer. The feature is complete from the data side and empty
-from the presentation side. Users who run the command get a directory of JSON files and
-no indication of how to use them.
+no template, no reference viewer. Users who run the command get a directory of JSON files
+and no indication of how to use them.
 
 A minimal bundled viewer — a single `index.html` that reads `tasks.json` and
-`collections.json` with no build step and no external dependencies — would make the
-export feature immediately useful and demonstrate what the data model looks like to an
-external consumer. This is a small amount of work for a large improvement in
-discoverability.
+`collections.json` with no build step — would make the export feature immediately useful.
+_(See Implementation Plan: P4)_
 
 ---
 
@@ -556,27 +569,55 @@ discoverability.
 |---|---|---|
 | P0 | TUI stability: footer, width, alignment, flicker | Polish |
 | P0 | `in-progress` task status + `task start` CLI command | Design shift |
-| P1 | Actor glyph (H/A) in task rows | Design shift |
-| P1 | `dooh log`: beautiful event stream viewer | Design shift |
-| P1 | TUI quick-add (`n` key) | Design shift |
+| P1 | Checklist migration (drop `task_subtasks`, add `task_checklist`) | Design shift |
 | P1 | `description` + `urls` fields on tasks; remove `groups` from TUI | Feature + cleanup |
-| P1 | Subtask → checklist migration (drop `task_subtasks`, add `task_checklist`) | Design shift |
-| P2 | "Since you were away" TUI view | Design shift |
-| P2 | Collection hierarchy navigation (breadcrumb + Left key) | Design shift |
-| P2 | `dooh init` interactive setup command | UX improvement |
-| P2 | Area view in TUI (`6` key) | Feature |
-| P2 | Priority semantics: define and document `now/soon/later` | Clarity |
+| P1 | `dooh log`: colorized event stream viewer | Design shift |
+| P1 | Actor glyph (H/A) in task rows | Design shift |
 | P2 | Filter token syntax: placeholder + help hint in TUI | Discoverability |
 | P2 | TUI sort controls: `o` key, sort chip, quoted filter tokens | UX improvement |
+| P2 | Area view in TUI (`6` key) | Feature |
+| P2 | Collection hierarchy navigation (breadcrumb + Left key) | Design shift |
+| P2 | "Since you were away" TUI view | Design shift |
+| P2 | `dooh init` interactive setup command | UX improvement |
+| P2 | Priority semantics: define and document `now/soon/later` | Clarity |
 | P3 | Single binary: remove `dooh-dev` target, add `--home` flag | Simplification |
+| P3 | Scheduling intelligence: rollover, `dooh today` CLI, estimates | Design shift |
 | P3 | Theme redesign: semantic tokens + contrast tests | Polish |
-| P3 | Scheduling intelligence: rollover, today CLI, estimates | Design shift |
 | P3 | Batch operations on status-change commands | Feature |
 | P3 | Outbox: consumer, status command, or removal | Cleanup |
 | P3 | README: lead with setup script, move manual steps to appendix | Clarity |
 | P3 | `whoami`/`context show`/`env` boundary clarification | Clarity |
+| P3 | `dooh init` non-interactive mode | Feature |
 | P4 | `export site` bundled HTML viewer | Feature |
 | P4 | Bubble Tea viewport + command palette | Polish |
+
+---
+
+## Deferred: TUI Write Features
+
+The TUI will remain read-only until the core pair visibility and navigation work (P0–P2)
+is complete. The write surface is a real future direction — the design below is preserved
+for when it becomes a priority. Do not implement any of this now.
+
+### Design proposal
+
+**The problem:** The TUI enforces a workflow split — humans look here, then switch to the
+CLI to act. This context-switch is small but persistent, and it makes the TUI feel like a
+dashboard rather than a workspace.
+
+**Minimum writable surface for a first pass:**
+- `n` to quick-add a task (title + priority; opens a two-field inline form, not a modal)
+- `x` or `Enter` (when on a task row) to complete
+- `e` to open an inline editor for the selected task's title and priority
+- `d` to archive
+- Checklist items checkable directly from the expanded task card
+
+This is not a full TUI editor — it is enough to close the loop without context-switching.
+Description, URLs, and relationships remain CLI territory.
+
+**Implementation note:** write interactions in a TUI with rich keybindings require careful
+modal design. Follow the pattern established by the filter interactions (`f`, `g`, `a`,
+etc.): a key opens an input mode, `Enter` commits, `Esc` cancels.
 
 ---
 
@@ -593,7 +634,7 @@ Key architectural decisions for anyone working on TUI items above.
   Each region is allocated before rendering; body gets what's left.
 - Re-render only on `WindowSizeMsg` or model mutations — never on a timer.
 
-### Filtering and sorting (P1/P2)
+### Filtering and sorting (P2)
 
 - Filter input parses a token AST: free-text fuzzy terms + typed tokens (`#tag`,
   `~area`, `^goal`, `@assignee`, `!overdue`, `!nodue`, `!todaydue`). Tokens combine
