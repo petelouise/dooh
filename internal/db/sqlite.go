@@ -35,10 +35,10 @@ func (s SQLite) QueryTSV(sql string) ([][]string, error) {
 		return nil, fmt.Errorf("sqlite3 query failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	text := strings.TrimSpace(out.String())
-	if text == "" {
+	if out.Len() == 0 {
 		return nil, nil
 	}
+	text := strings.TrimRight(out.String(), "\n")
 	lines := strings.Split(text, "\n")
 	rows := make([][]string, 0, len(lines))
 	for _, line := range lines {

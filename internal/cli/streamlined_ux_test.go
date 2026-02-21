@@ -240,3 +240,61 @@ func TestInitDatabaseReusable(t *testing.T) {
 		t.Fatalf("second init failed: %v", err)
 	}
 }
+
+func TestDBMigrateAppliesInProgressStatus(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	path := filepath.Join(t.TempDir(), "migrate_test.db")
+	sqlite := db.New(path)
+	mustExec(t, sqlite, "PRAGMA journal_mode=WAL;")
+	mustExec(t, sqlite, `
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled'))
+);
+CREATE TABLE tasks (
+  id TEXT PRIMARY KEY,
+  short_id TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed','archived')),
+  priority TEXT NOT NULL DEFAULT 'later' CHECK(priority IN ('now','soon','later')),
+  due_at TEXT,
+  scheduled_at TEXT,
+  rollover_enabled INTEGER NOT NULL DEFAULT 0,
+  skip_weekends INTEGER NOT NULL DEFAULT 0,
+  estimated_minutes INTEGER,
+  completed_at TEXT,
+  archived_at TEXT,
+  deleted_at TEXT,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  version INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO users(id,name) VALUES('u','Test User');
+INSERT INTO tasks(id,short_id,title,status,priority,created_by,updated_by)
+  VALUES('t1','t_AAA','Alpha','open','now','u','u');
+`)
+
+	var out bytes.Buffer
+	if err := Run([]string{"db", "migrate", "--db", path}, &out); err != nil {
+		t.Fatalf("db migrate failed: %v", err)
+	}
+
+	// After migration, task can be set to in_progress
+	if err := sqlite.Exec("UPDATE tasks SET status='in_progress' WHERE id='t1';"); err != nil {
+		t.Fatalf("expected in_progress to be valid after migration: %v", err)
+	}
+	// started_at column exists
+	rows, err := sqlite.QueryTSV("SELECT started_at FROM tasks WHERE id='t1';")
+	if err != nil {
+		t.Fatalf("started_at column should exist after migration: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("expected row from tasks")
+	}
+}

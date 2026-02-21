@@ -18,7 +18,8 @@ import (
 
 func printDBHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "db subcommands:")
-	_, _ = fmt.Fprintln(out, "  init   initialize a new database")
+	_, _ = fmt.Fprintln(out, "  init     initialize a new database")
+	_, _ = fmt.Fprintln(out, "  migrate  apply pending schema migrations to an existing database")
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "usage: dooh db init [--db <path>]")
 	_, _ = fmt.Fprintln(out, "example:")
@@ -33,9 +34,11 @@ func runDB(rt runtime, args []string, out io.Writer) error {
 	switch args[0] {
 	case "help", "--help", "-h":
 		return printDBHelp(out)
+	case "migrate":
+		return runDBMigrate(rt, args[1:], out)
 	}
 	if args[0] != "init" {
-		return fmt.Errorf("unknown db command %q (available: init)", args[0])
+		return fmt.Errorf("unknown db command %q (available: init, migrate)", args[0])
 	}
 	fs := flag.NewFlagSet("db init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -478,6 +481,75 @@ func readInitMigration() (string, []byte, error) {
 		lastErr = err
 	}
 	return "", nil, fmt.Errorf("read migration migrations/0001_init.sql: %w", lastErr)
+}
+
+func readMigration(name string) ([]byte, error) {
+	candidates := []string{
+		filepath.Join("migrations", name),
+		filepath.Join("..", "migrations", name),
+		filepath.Join("..", "..", "migrations", name),
+	}
+	if _, file, _, ok := goruntime.Caller(0); ok {
+		base := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+		candidates = append([]string{filepath.Join(base, "migrations", name)}, candidates...)
+	}
+	var lastErr error
+	for _, path := range candidates {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			return b, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("read migration %s: %w", name, lastErr)
+}
+
+func runDBMigrate(rt runtime, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("db migrate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dbPath := fs.String("db", "", "sqlite database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dbResolved := resolveDB(rt, *dbPath)
+	sqlite := db.New(dbResolved)
+
+	rows, err := sqlite.QueryTSV("PRAGMA user_version;")
+	if err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+	current := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		current = parseIntDefault(rows[0][0], 0)
+	}
+
+	type pending struct {
+		version int
+		name    string
+	}
+	migrations := []pending{
+		{2, "0002_in_progress_status.sql"},
+	}
+
+	applied := 0
+	for _, m := range migrations {
+		if current >= m.version {
+			continue
+		}
+		sql, err := readMigration(m.name)
+		if err != nil {
+			return err
+		}
+		if err := sqlite.Exec(string(sql)); err != nil {
+			return fmt.Errorf("apply %s: %w", m.name, err)
+		}
+		applied++
+		_, _ = fmt.Fprintf(out, "applied migration %s\n", m.name)
+	}
+	if applied == 0 {
+		_, _ = fmt.Fprintln(out, "database is up to date")
+	}
+	return nil
 }
 
 func userIDByName(sqlite db.SQLite, name string) (string, error) {
