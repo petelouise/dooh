@@ -1,410 +1,481 @@
-# dooh: Goals, Priorities, and Interface Assessment
+# dooh: Vision, Priorities, and Interface Critique
 
-_Last updated: 2026-02-21_
-
-This document synthesizes what the project is for, what should be built next, what
-needs improvement, and where the current interface is confusing or inelegant. Items are
-prioritized throughout.
+_2026-02-21 — supersedes all prior versions of this document_
 
 ---
 
-## 1. Project Goals
+## The Premise
 
-**dooh** is a local-first task and goal management system designed for one human and one
-AI agent sharing a machine. The name ("do?, oh!") reflects the pair dynamic: the human
-asks "do?", the AI replies "oh!" (or vice versa).
+dooh is a shared workspace for a human and an AI working together on the same machine.
+Not a task manager with an AI bolt-on. Not an AI tool with a human approval screen. A
+genuine pair: two actors, one database, every action attributed, full history retained.
 
-### Core goals
-
-1. **Clear attribution for every action.** Every mutation is recorded with the actor's
-   identity (human or AI), key, and timestamp. This makes it auditable and trustworthy
-   even when the AI is running autonomously for extended periods.
-
-2. **Ergonomic for both actors.** Humans get a keyboard-first TUI with beautiful themes
-   and natural-language timestamps. AI agents get machine-readable output, precise scopes,
-   and stable flag interfaces. Neither interface should be an afterthought.
-
-3. **Local-first, no cloud dependency.** A single SQLite database with WAL mode and
-   event sourcing. No sync server, no API to call, no credentials to rotate externally.
-   The pair works on the same machine and shares the same database.
-
-4. **Sufficient for real project management.** Tasks with dependencies, subtasks,
-   priorities, scheduled/due dates, estimates, and assignments. Collections for projects,
-   goals, areas, and tags, with hierarchical links. Not a toy.
-
-5. **Readable audit trail.** The append-only events table is the canonical history.
-   System rollback is possible. The pair should be able to answer "who changed this and
-   when?" for any task without raw SQL.
-
-6. **Static website integration.** A read-only JSON export (`export site`) lets task
-   data appear on external dashboards or sites without running any server.
-
-### What it is not (MVP constraints)
-
-- Not a multi-user, multi-machine, or cloud-synced system.
-- Not a mobile or web-first tool.
-- Not an AI assistant itself—dooh is the shared workspace the pair manages together.
-- Not a general project management SaaS replacement.
+The system's deepest value proposition is accountability over time — not just "what tasks
+exist" but "who did what, when, and in which order." The event log is the product.
+Everything else is interface to it.
 
 ---
 
-## 2. Features to Implement Next
+## What Success Looks Like
 
-Ranked by impact and dependency order. P0 items are blockers for reliable AI-agent use.
-P1–P2 items are high-value and tractable. P3+ items are worth doing but not urgent.
+When dooh is working well:
 
-### P0 — Critical for AI-agent usability
+- The human opens the TUI and immediately sees what the AI has been doing in their
+  absence — which tasks the AI touched, created, or completed, without needing to read
+  the audit log.
+- The AI opens its shell, runs `dooh whoami`, and has everything it needs — no brittle
+  text parsing, no manual ID extraction, no raw SQL.
+- A new task moves from `open` to `in progress` to `done`, and the event log tells a
+  coherent story of who pushed it forward at each step.
+- The collection hierarchy drives where you look, not just how things are tagged: drilling
+  from a goal into an area into a project into a task is one gesture at each level.
+- First-time setup takes one command.
+- There is one binary.
 
-**2.1 `--json` output on all data-returning commands**
-
-Every command outputs fixed-width ANSI tables or embedded-sentence results. There is no
-machine-readable mode. An AI agent must strip ANSI codes, parse variable-width columns,
-and use different regex patterns for every command. This is fragile and will break as
-output format evolves.
-
-Add `--json` to: `task add`, `task list`, `task show`, `task update`, `task complete`,
-`task reopen`, `task archive`, `task delete`, `collection add`, `collection list`,
-`collection show`, `event list`, `whoami`, `context show`, `user list`.
-
-When `--json` is set: output single JSON object or array (never mixed), suppress the
-`printWriteContext` banner or nest it under a `"context"` key, and include all fields
-untruncated.
-
-**2.2 `task show --id <id>`**
-
-No command retrieves the full detail of a single task by ID. To inspect a task an AI
-agent must parse the entire `task list` table or drop to raw SQL. Add `task show` returning
-all task fields, assignees, blockers (with their statuses), subtasks (with statuses),
-collection memberships, and created/updated actors. With `--json`, this becomes the
-primary read path for agents.
-
-**2.3 `task update --id <id> [flags]`**
-
-After creation, a task's title, priority, due date, scheduled date, description, and
-estimate cannot be changed from the CLI. Only status transitions (complete/reopen/archive)
-and relationship mutations exist. Add `task update` accepting any subset of `--title`,
-`--priority`, `--due`, `--scheduled`, `--description`, `--estimate`, `--rollover`,
-`--skip-weekends`.
-
-**2.4 TUI stability baseline (P0 from TUI_ROADMAP)**
-
-Before adding TUI scope, the existing rendering needs to be trustworthy:
-- Footer hotkeys line must be visible at all times (currently inconsistent).
-- Title/filter/footer background must fill the exact terminal width.
-- Column headers must align with row columns at widths 80/100/140.
-- Idle flicker must be eliminated.
-
-Implementation approach: move all line composition to plain-text segments first, apply
-style last; use ANSI-aware width helpers (`visibleWidth`, `truncateVisible`, `padVisible`);
-reserve fixed layout regions for header, footer, and viewport body.
+Most of these are not true yet. This document describes how to get there.
 
 ---
 
-### P1 — High value, moderate effort
+## Proposed Big Changes
 
-**2.5 `task list` filtering flags**
-
-`task list` has no filter options. The SQL is hardcoded and returns all non-deleted tasks
-ordered by `updated_at`. Add: `--status open|completed|archived|all` (default `open`),
-`--priority now|soon|later|all`, `--assignee <user_id>`, `--collection <collection_id>`,
-`--limit N`, `--offset N`, `--sort updated|priority|scheduled|created`,
-`--order asc|desc`.
-
-**2.6 `event list` CLI command**
-
-The events table is the audit core, but it is only queryable via raw `sqlite3` commands.
-Add `event list` with `--limit N` (default 20), `--type <event_type>`, `--actor <user_id>`,
-`--client-type human_cli|agent_cli`, `--since <timestamp>`, and `--json`. Output columns:
-seq, event_type, actor_user_id, client_type, aggregate_type, aggregate_id, occurred_at.
-
-**2.7 Task-to-collection membership commands**
-
-The `task_collections` join table exists and the schema fully supports M2M membership,
-but no CLI commands expose it. Add `task collection add --id <task> --collection <id>`
-and `task collection remove --id <task> --collection <id>`. Without these, an AI agent
-cannot organize tasks into collections without raw SQL.
-
-**2.8 TUI filtering and sorting UX (P1 from TUI_ROADMAP)**
-
-The tokenized quick-filter syntax (`#tag`, `~area`, `^goal`, `@assignee`, `!overdue`)
-is partially implemented but not fully consistent. Formalize a filter AST with AND
-semantics across token types, add top-bar chips reflecting parsed tokens, and add a sort
-chip + `o` keybinding for cycling sort modes. Support quoted multi-word tokens
-(`#"Deep Work"`).
+These are not feature requests — they are design shifts. Some require rethinking existing
+interfaces. All are worth the disruption.
 
 ---
 
-### P2 — Important, lower urgency
+### 1. Make the TUI writable
 
-**2.9 `description` and `urls` fields on tasks**
+The TUI is currently read-only. It is beautiful and well-designed for browsing, but it
+enforces a workflow split that cuts against the tool's own premise: humans look here,
+then switch to a different interface (the CLI) to act. This context-switch is small but
+persistent, and it makes the TUI feel like a dashboard rather than a workspace.
 
-Tasks have no description or URL fields. Add both as schema migrations:
-`tasks.description TEXT NOT NULL DEFAULT ''` and `tasks.urls TEXT NOT NULL DEFAULT ''`
-(newline-delimited for MVP). Expose via `task add --description --url` (repeatable)
-and `task update`. Show in TUI expanded card view. Remove `groups` from TUI at the same
-time.
+**The shift:** treat the TUI as the primary interface for humans. The CLI becomes the
+scripting layer — the interface for agents and for automation. Humans who want to work
+in the terminal should not need to leave the TUI to manage tasks.
 
-**2.10 `collection show --id <id>`**
+**Minimum writable surface for a first pass:**
+- `n` to quick-add a task (title + priority; opens a two-field inline form, not a modal)
+- `x` or `Enter` (when on a task row) to complete
+- `e` to open an inline editor for the selected task's title and priority
+- `d` to archive
 
-No command shows a collection's details plus member tasks. Add `collection show` returning
-name, kind, color, parent/child collections, and member tasks with their statuses.
-Essential for an AI agent building project status summaries.
+This is not a full TUI editor — it is enough to close the loop without context-switching.
+Description, URLs, and relationships remain CLI territory for now.
 
-**2.11 `--quiet` / banner suppression**
-
-Every write command prepends a context banner (`context profile=ai mode=ai user=... db=...`)
-before the result. This is useful for human verification but is the first line of output
-for agents, requiring every caller to skip it. With `--json`, suppress the banner (or
-nest under `"context"`). With `--quiet`, suppress it regardless of output format.
-
-**2.12 Per-command help text**
-
-`dooh task` (no subcommand) returns a generic error. `dooh task add --help` fails
-silently (flags output is discarded). Remove `fs.SetOutput(io.Discard)` and add a brief
-flag summary and usage examples to each subcommand. The help text doesn't need to be
-exhaustive, but it should name all flags and their defaults.
-
-**2.13 Remove `groups` from codebase**
-
-The `groups` collection kind appears in the TUI expanded task card but is ambiguous and
-unwanted. It is already flagged for removal in TUI_ROADMAP. Remove from TUI output,
-help text, and docs. The data model can retain it for backward compatibility but no new
-tasks should be added to group-kind collections via normal workflows.
+**Risk:** write interactions in a TUI that already has rich keybindings require careful
+modal design. The existing filter interactions (`f`, `g`, `a`, etc.) set a good precedent.
+Follow the same pattern: a key opens an input mode, `Enter` commits, `Esc` cancels.
 
 ---
 
-### P3 — Useful but not urgent
+### 2. Surface the pair dynamic in every view
 
-**2.14 Area navigation in TUI (P3 from TUI_ROADMAP)**
+The central differentiator of dooh — human+AI attribution on every action — is almost
+invisible in the UI. Task rows do not indicate who last touched them. There is no "what
+happened while I was away" view. The pair is a first-class concept in the data model but
+a second-class citizen in the interface.
 
-No dedicated areas view exists (unlike projects and goals which have progress views).
-Add a `6` key shortcut for areas, a dedicated areas view with completion and counts, and
-drill-in scoping by entering on an area row.
+**The shift:** make actor type visible at a glance, everywhere.
 
-**2.15 Theme system redesign (P4 from TUI_ROADMAP)**
+**Concrete changes:**
 
-Current themes use ad-hoc palette values with hardcoded 256-color fallbacks that can
-look inconsistent across terminals. Replace with semantic theme tokens (text/muted/accent/
-success/warn/danger/chart1-4). Add contrast validation tests. Add at least 2 more light
-themes; the current set is dark-heavy.
+- **Actor glyph in task rows.** Add a one-character column after the status icon:
+  `H` (human, styled in the human accent color) or `A` (AI, styled in the AI accent
+  color) showing who last modified the task. This is already in the events table — it
+  just needs to be surfaced.
 
-**2.16 Distinct exit codes by error category**
+- **A "since you were away" view.** A new TUI view (key `6`) that shows tasks the AI
+  touched since the human's last interaction. "Last interaction" can be the timestamp of
+  the last `human_cli` event. This view answers the most common pair question — "what did
+  the AI do?" — without requiring the user to read the audit log.
 
-All errors exit with code 1. Callers (including AI agents) cannot distinguish auth
-failures from not-found from validation errors without parsing stderr. Add: 2 for
-usage/validation, 3 for auth failure, 4 for not found, 5 for permission denied,
-6 for conflict/precondition failure.
-
-**2.17 Batch operations**
-
-All mutations are single-item. An AI agent completing 10 tasks makes 10 sequential calls.
-Accept comma-separated or repeated `--id` flags on `task complete`, `task archive`,
-`task assign add`. Lower priority than filtering and structured output, but useful for
-multi-step workflows.
-
-**2.18 Lower-privilege user lookup**
-
-`user list` requires `users:admin` scope, which AI keys do not have. But an AI agent
-needs user IDs to run `task assign add`. Add `user lookup` (or a read-only user list)
-requiring only `tasks:read` scope. Return only `id` and `name` for active users.
+- **`dooh log`** as a first-class command. A beautiful, colorized event stream, formatted
+  like `git log --oneline`, with actor type, event kind, and task/collection name. The
+  key is not the data (that already exists via `dooh event list --json`) but the
+  formatting: fast, readable, useful at a glance. Human events in one color, AI events
+  in another. Default: last 40 events. Filterable by actor, type, or aggregate.
 
 ---
 
-### P4 — Optional, high effort
+### 3. Add `in-progress` as a task status
 
-**2.19 Bubble Tea primitives for layout/viewport (P5 from TUI_ROADMAP)**
+The current lifecycle is `open → completed | archived`. There is no way to mark a task
+as "being worked on right now." This gap is small for humans, who can hold context
+mentally, but significant for the pair — if the AI is executing a multi-step task, there
+is no machine-readable signal that the task is actively in flight versus waiting.
 
-Current Bubble Tea use is mostly event loop and key handling. Adopting `bubbles/viewport`
-for the task body, a command palette (`:`) for discoverable actions, and lightweight
-expand/collapse animations would make the TUI feel more polished. Defer until P0–P2 are
-stable.
+**The shift:** add `in-progress` between `open` and `completed`.
 
-**2.20 TUI write operations**
+- An AI agent should call `task start --id <id>` when beginning work, and `task complete`
+  when done. This makes the pair's division of labor machine-visible.
+- The TUI should distinguish `in-progress` tasks with a distinct status icon (◎ or ▶)
+  and show them prominently in the today view.
+- `in-progress` tasks should appear at the top of the task list regardless of sort mode,
+  since they are the most urgent context.
+- The event type becomes `task.started`, joining `task.created`, `task.completed`, etc.
 
-The TUI is fully read-only. Power users who want to create, edit, or complete tasks
-without leaving the TUI must switch to the CLI. A minimal write surface (quick-add via
-`n`, inline complete via `x`, inline priority toggle) would close this gap. This requires
-careful modal design to avoid clashing with existing filter interactions.
-
----
-
-## 3. What Should Be Improved
-
-### 3.1 Setup ceremony
-
-The manual first-time setup is 6 steps (db init, user create, key create, login, context
-set, verify). `setup-stable.sh` hides this, but the script is not the documented default
-path. A single `dooh init` command should do all of this interactively, prompting for
-a user name and outputting the final context state. The script can remain as a
-non-interactive CI option.
-
-### 3.2 Auth model clarity
-
-The relationship between `DOOH_MODE`, `DOOH_AI_KEY`, and key `client_type` is subtle.
-Mode is technically auto-derived from the key type, but `DOOH_MODE` is still referenced
-in some error messages and the README. An AI agent reading the docs has to understand all
-three concepts before knowing what environment variables to set. Simplify: if `DOOH_AI_KEY`
-is set, that is sufficient. Document that `DOOH_MODE` is deprecated for auto-derived keys.
-
-### 3.3 Overlapping diagnostic commands
-
-`dooh whoami`, `dooh context show`, `dooh config show`, and `dooh env` all print
-overlapping identity/config information. Their relationship is not obvious. Consolidate:
-`whoami` should be the single "who am I and what am I connected to" command. `context show`
-and `config show` can remain for config debugging, but their output should not repeat
-identity information that `whoami` already shows.
-
-### 3.4 Event payload is not queryable from CLI
-
-`events.payload_json` stores the full delta for each mutation, but `event list` (once
-added) should also expose the payload—or at least the changed fields—in `--json` mode.
-Currently the payload is useful only to developers reading the DB directly.
-
-### 3.5 Error messages are minimal
-
-Most error paths print a single lowercase sentence without structured context. An AI
-agent receiving `task not found` has no field telling it _which_ ID was not found.
-Error output should include the relevant IDs and operation, especially when `--json` is
-set (output a JSON error object with `{"error": "...", "code": "not_found", "id": "..."}`).
-
-### 3.6 Two binaries create cognitive overhead
-
-The stable/dev channel split (`dooh` vs `dooh-dev`) is a sound isolation strategy,
-but it means users and AI agents must track which binary they're running. A `--channel`
-flag or a single binary that reads `DOOH_HOME` for isolation would be simpler. The
-current approach works but adds a surface for mistakes (running `dooh` when you meant
-`dooh-dev` against the wrong DB).
-
-### 3.7 `task list` does not show collection membership
-
-The CLI task list shows title, status, priority, updated, and task ID. There is no
-column for which project or area a task belongs to. For a human or AI reviewing a full
-task list, it is impossible to understand task context without drilling into each task.
-Add an optional `--show-collections` flag or a narrower `--show-project` / `--show-area`
-column.
+This requires a schema migration (add `in_progress` to the status CHECK constraint and
+a `started_at` timestamp column) and updates to the TUI, CLI, and export.
 
 ---
 
-## 4. What Is Confusing or Inelegant About the Current Interface
+### 4. Let the collection hierarchy drive navigation
 
-### 4.1 Context banner on every write command (highest friction)
+The `collection_closure` table encodes a full ancestor/descendant tree across the
+collection hierarchy. This is a significant piece of infrastructure that is completely
+invisible in the navigation. The TUI has five flat views numbered 1–5. The collection
+hierarchy should be the navigation, not a filter facet.
 
-Every mutation prints a banner before the result:
-```
-context profile=ai mode=ai user=01ABCDEF key=aaaaaaaa db=./dooh.db
-created task t_abc123 (Water mint patch)
+**The shift:** the TUI's primary navigation axis is the collection tree, not the view
+tabs.
+
+**Concrete design:**
+
+- Entering a project from the project view (current behavior) is the right primitive.
+  Extend it: entering a goal shows that goal's projects; entering a project shows its
+  areas; entering an area shows its tasks. Each drill-in scopes the view, and the scope
+  chip in the filter bar shows the path (`Goal > Project > Area`).
+- Add breadcrumb navigation: `Left` goes up one level in the hierarchy.
+- The numbered views (`1`–`5`) become view-mode shortcuts within the current scope,
+  not global scope-changers. From inside a project, `1` shows that project's tasks,
+  `2` shows its progress, etc.
+- Tab order in the header should reflect this: scope is the outermost dimension,
+  view mode is the inner dimension.
+
+This does not require new data — the collection_closure query already supports it.
+It is a navigation redesign, not a data redesign.
+
+---
+
+### 5. Kill the dual binary
+
+`dooh` and `dooh-dev` are separate binaries produced from the same codebase. The
+isolation they provide (separate config dirs, separate databases) is real and useful.
+The mechanism (two binaries) is unnecessary.
+
+**The shift:** one binary, configured by `DOOH_HOME` or `--home`.
+
+```bash
+# stable (current default)
+dooh task list
+
+# dev channel, explicit
+DOOH_HOME=~/.config/dooh-dev dooh task list
+
+# or via alias in shell profile
+alias dooh-dev='DOOH_HOME=~/.config/dooh-dev dooh'
 ```
 
-The banner was added for human verification of identity but creates two problems: (1) an
-AI agent must skip the first line of every command's output, and (2) the truncated key
-prefix is exposed in terminal history for every write. This is the single most
-friction-generating behavior for scripted use.
+The install script can set up both aliases. Channel identity (which home dir you're in)
+can be shown in the `whoami` output and the TUI context banner. The binary itself does
+not need to encode the channel.
 
-### 4.2 IDs are inconsistent across commands
-
-| Command | Output | ID format |
-|---|---|---|
-| `task add` | `created task t_abc123 (title)` | embedded in sentence |
-| `task complete` | `completed task t_abc123` | embedded in sentence |
-| `task list` | table, last column | right-padded column |
-| `collection add` | `created collection c_abc123 (name)` | embedded in sentence |
-| `user create` | `created user 01ULID (name)` | full ULID, not short_id |
-| `whoami` | `user=01ULID` | key=value pair |
-
-An AI agent needs a different extraction strategy for every command. Adding `--json`
-fixes this for structured callers; a consistent `id=<value>` suffix would help for
-non-JSON callers.
-
-### 4.3 TUI filter syntax is undiscoverable
-
-The quick-token syntax in the text filter (`#tag`, `~area`, `^goal`, `@assignee`, `!due`,
-`!overdue`, `!nodue`) is powerful but completely invisible until you read the README or
-press `f`. There is no tooltip, no example shown in the filter input placeholder, and no
-help text inside the TUI itself. The footer line (when visible) does not mention filter
-tokens. New users will use only fuzzy text matching and never discover scoped filtering.
-
-### 4.4 `groups` appears in task detail but has no defined purpose
-
-The expanded task card in the TUI shows `groups:` as a collection category alongside
-`projects`, `goals`, `areas`, and `tags`. Nothing in the docs defines what a group is
-or how it differs from an area. The TUI_ROADMAP already calls for its removal. Until
-removed, it creates confusion about the collection taxonomy.
-
-### 4.5 TUI is read-only with no indication of how to write
-
-A user launching the TUI for the first time sees a beautiful task list but there is no
-affordance pointing toward how to create or edit tasks. The TUI shows `q` to quit but
-nothing explains that all mutations happen in the CLI. At minimum, the footer or a
-splash line should note "use `dooh task add` to create tasks."
-
-### 4.6 `dooh env` output purpose is unclear
-
-`dooh env` outputs the resolved environment variables. The distinction between `env`,
-`context show`, and `config show` is not documented in the command output itself.
-A user who runs all three will see overlapping information and won't know which is
-canonical. Adding a one-line description at the top of each command's output (or making
-`--help` explain the difference) would resolve this.
-
-### 4.7 `--bootstrap` flag has no discoverable documentation
-
-The `--bootstrap` flag on `user create` and `key create` bypasses the auth requirement
-during initial setup. It is essential for first-time setup and in the quickstart scripts,
-but it doesn't appear in the command-level help (which is minimal or missing). A user
-trying to set up dooh from scratch without the setup scripts will not know to use it.
-
-### 4.8 Priority `now/soon/later` has no displayed semantics
-
-The three-level priority system (`now`, `soon`, `later`) is clean, but there is no
-explanation anywhere in the CLI or TUI of what each level means operationally (is `now`
-for today? this sprint? blocking?). The TUI shows the priority label but doesn't help
-users decide which level to choose when adding a task. A brief definition in help text
-or the TUI would make the system feel more intentional.
-
-### 4.9 `export site` has no bundled viewer
-
-`dooh export site --out ./site-data` produces well-structured JSON
-(`tasks.json`, `collections.json`, `metrics.json`). But the README contains no pointer
-to a viewer, template, or example website. The output is useful only to users who already
-have a site to consume it. Providing a minimal HTML file or linking to an example would
-make the export feature immediately usable for more users.
-
-### 4.10 `collection list` output does not show kind or task count
-
-The collection list shows name and short ID but not the kind (`project`, `goal`, `area`,
-`tag`) or how many tasks belong to each collection. A user looking at a collection list
-cannot distinguish a project from a goal from an area at a glance. Adding kind and
-member count columns would make the list immediately useful.
+This eliminates: two build targets, two install paths, two config dirs to document, and
+the cognitive load of remembering which binary to invoke for which purpose.
 
 ---
 
-## Priority Summary
+### 6. Replace setup scripts with `dooh init`
+
+First-time setup currently takes six manual steps (or a shell script that most users
+will read skeptically). This is the worst possible first impression for a tool that
+should feel elegant.
+
+**The shift:** `dooh init` is an interactive first-time setup command.
+
+```
+$ dooh init
+Welcome to dooh.
+Your name: Pete
+Creating database at ~/.local/share/dooh/dooh.db...
+Creating user "Pete"...
+Creating human admin key...
+Key stored at ~/.config/dooh/auth/default.human.key
+Context saved.
+
+Ready. Run 'dooh task add --title "First task" --priority now' to begin.
+```
+
+If `DOOH_AI_KEY` is set, `dooh init` detects it and offers to register the AI user
+and key in the same pass.
+
+The existing setup scripts remain for non-interactive CI/bootstrap use, but `dooh init`
+is what the documentation leads with.
+
+---
+
+### 7. Build the scheduling intelligence the schema promises
+
+The schema has `rollover_enabled`, `skip_weekends`, `scheduled_at`, and
+`estimated_minutes`. These are real scheduling concepts. But none of them drive any
+behavior visible to the user — they are stored and forgotten.
+
+**The shift:** make scheduling meaningful.
+
+- **`dooh today`** as a CLI command (not just a TUI view): shows tasks scheduled for
+  today, tasks that have rolled over from past days (if `rollover_enabled`), and tasks
+  overdue. Output is ordered: overdue first, then today's tasks by priority, then
+  tomorrow's candidates.
+- **`rollover`** should visibly mark tasks that rolled over from a previous day with a
+  distinct marker in both TUI and CLI output. Currently there is no indication that a
+  task's scheduled date is stale.
+- **`estimated_minutes`** should be summed in the today view to show total estimated
+  time for the day, giving the pair a capacity signal.
+- **`skip_weekends`** should be surfaced in the TUI: if a task is scheduled for a
+  weekend, it should be automatically forwarded to Monday and marked as such.
+
+---
+
+## Immediate Priorities
+
+What to work on now, given the above direction. The big changes above are the north
+star; these are the immediate next steps ordered by impact.
+
+**P0 — Do before anything else**
+
+- **TUI stability baseline** (see TUI_ROADMAP.md P0): footer visibility, full-width
+  background fill, column alignment, flicker elimination. The TUI is nearly there but
+  not yet trustworthy at all terminal widths. Fix this before extending the TUI.
+
+- **`in-progress` task status**: schema migration, `task start` CLI command, TUI icon,
+  event attribution. Small scope, high leverage for pair visibility.
+
+**P1 — High value, moderate effort**
+
+- **Actor glyph in task rows**: surface `client_type` from the most recent event per
+  task in the task list query. Add one-character column. No new data, new presentation.
+
+- **`dooh log` command**: format the event stream beautifully. Pull from `event list`
+  data, apply colors by actor type, show event kind and aggregate name. The hard part
+  is making it feel like `git log`, not like a database dump.
+
+- **TUI quick-add** (`n` key): inline two-field form (title + priority cycle). Commit on
+  `Enter`. The pattern is already established by the filter input mode.
+
+- **`urls` field on tasks**: schema migration, `task add --url`, `task update --url`,
+  TUI expanded card display. Remove `groups` from TUI in the same pass.
+
+**P2 — Important, not urgent**
+
+- **"Since you were away" view** in TUI: tasks touched by the other actor since the
+  viewer's last event. Requires computing "last human event" and "last AI event"
+  timestamps.
+
+- **Collection hierarchy navigation**: breadcrumb path in filter bar, `Left` to go up
+  one scope level. The drill-in already works; add the return path.
+
+- **`dooh init`**: interactive first-time setup. Replace the documentation's manual
+  6-step sequence.
+
+- **Area view in TUI**: dedicated areas view with completion counts, `6` shortcut. Reuse
+  the progress-row loader used by project/goal views.
+
+**P3 — Polish and completeness**
+
+- **Dual binary → single binary**: update install script, update documentation, add
+  `--home` flag. Low risk, meaningful simplification.
+
+- **Theme redesign** (TUI_ROADMAP P4): semantic tokens, contrast validation, 2 more
+  light themes.
+
+- **Scheduling intelligence**: `dooh today` CLI command, rollover markers, estimate
+  summation in today view, skip-weekends forwarding.
+
+- **Batch operations** on status-change commands: accept repeated `--id` flags on
+  `task complete`, `task archive`, `task assign add`.
+
+- **`dooh init`** non-interactive mode: `--name`, `--ai-key`, `--db` flags for
+  script-driven setup.
+
+---
+
+## Interface Critique
+
+An honest assessment of what is currently confusing, inelegant, or in tension with the
+tool's own goals. Ordered by severity.
+
+---
+
+### The TUI is a bystander
+
+The most important interface problem is not a bug or a missing feature. It is a design
+orientation. The TUI currently watches the pair work and reports on it. This is fine for
+a dashboard but wrong for a workspace. A human using dooh day-to-day will spend most of
+their time in the TUI — browsing tasks, checking project progress, planning the day —
+and then leave it every time they want to act. That break in flow is the interface's
+biggest friction point.
+
+The fix is making the TUI writable (see Proposed Big Change 1 above), but the
+orientation shift matters independently: every design decision in the TUI should ask
+"what would a human want to do from here?" not just "what information is useful to show?"
+
+---
+
+### The pair is invisible
+
+dooh's differentiator — two actors working together, every action attributed — barely
+shows up in the UI. A human looking at a task list sees titles, priorities, and statuses.
+They do not see whether a task was last touched by them or by the AI. They cannot tell,
+at a glance, that the AI has been active. The "pair" is a data model concept that stops
+at the database boundary.
+
+Fixing this requires no new data, only new presentation: an actor glyph per task row,
+a "since you were away" view, and `dooh log` as a daily-use command. These three things
+together would make the pair dynamic visible and would give dooh a distinctive interface
+identity.
+
+---
+
+### Priority semantics are undefined
+
+The three-level priority system (`now`, `soon`, `later`) is clean and easy to use. But
+what each level means is never stated. The README describes them as options; the TUI shows
+them as labels; the CLI accepts them as strings. There is no guidance on when to choose
+one over another.
+
+This matters because the AI will be assigning priorities too. Without defined semantics,
+the pair cannot maintain consistent priority discipline over time. A suggested definition:
+
+- **`now`**: actively in progress or blocking something in progress. Work on this today.
+- **`soon`**: committed for the current week. Not today, but not deferrable beyond the
+  week.
+- **`later`**: on the radar, not scheduled. Review during weekly planning.
+
+This definition should appear in `dooh task add --help`, in the TUI footer or expanded
+task card, and in the README.
+
+---
+
+### `groups` in the TUI detail card has no referent
+
+The expanded task card shows `groups:` as a collection category alongside `projects`,
+`goals`, `areas`, and `tags`. The collection schema has no `group` kind — the valid kinds
+are `project`, `goal`, `tag`, `class`, `area`, and `custom`. The `groups` field in the
+`row` struct appears to be populated from somewhere (possibly `class`-kind collections
+or an earlier schema state), but its semantic meaning is undefined. Users seeing `groups:`
+in the detail card do not know what it represents or how to populate it.
+
+Remove `groups` from the TUI detail card. If `class`-kind collections are genuinely
+useful, show them as `class:` with their own semantics defined. If they are not useful,
+remove the kind from the schema.
+
+---
+
+### The filter token syntax is invisible
+
+The TUI's text filter (`f`) supports a powerful scoped token syntax: `#tag`, `~area`,
+`^goal`, `@assignee`, `!overdue`, `!nodue`, `!todaydue`. This is the fastest way to
+scope a task list — faster than the dropdown filters for tags and assignees. But nothing
+in the TUI surface indicates it exists. The filter input shows a blank cursor. The footer
+shows hotkeys for view modes but not for filter tokens.
+
+At minimum: show a one-line placeholder in the filter input field (`#tag ~area @user …`),
+and add a token syntax hint to the TUI help screen (or the expanded footer row).
+
+---
+
+### `rollover_enabled` and `skip_weekends` are schema ghosts
+
+These fields exist on every task record. They represent real, useful scheduling behavior.
+But there is no CLI flag to set them during `task add` (only `task update` exposes them,
+if it does at all), no TUI indicator that a task has them enabled, and no visible effect
+— a task with `rollover_enabled=1` looks identical to one without it. They are promises
+the interface has not kept.
+
+Either implement the scheduling behavior these fields imply (see Proposed Big Change 7),
+or remove them from the schema and the documentation. Invisible features are worse than
+missing features: they create false confidence and cluttered data.
+
+---
+
+### The outbox has no consumer
+
+The `outbox` table (status: pending/delivered/failed, with retry logic) is the
+infrastructure for delivering events to external consumers. But no consumer exists. The
+table accumulates rows that are never delivered and never cleaned up. Users who run
+`sqlite3 dooh.db "select count(*) from outbox"` will find a growing list of pending
+records with no explanation.
+
+If the outbox is infrastructure for a future integration, document it clearly and add a
+`dooh outbox status` command that shows pending/delivered/failed counts. If no integration
+is planned for the foreseeable future, remove it — or at least add a periodic cleanup
+that marks old pending rows as failed with a clear reason.
+
+---
+
+### Setup ceremony is hostile for newcomers
+
+The manual first-time setup takes six steps, requires knowing ULID-format user IDs, and
+involves running `sqlite3` directly. The setup scripts hide this, but the documentation
+leads with the manual steps before the scripts. A newcomer following the README will hit
+database concepts before they have created a single task.
+
+The fix is `dooh init` (see Proposed Big Change 6), but even before that, the README
+should lead with the setup script, not the manual steps. Manual steps belong in an
+appendix.
+
+---
+
+### `dooh whoami` vs `dooh context show` vs `dooh env`
+
+Three commands return overlapping identity and configuration information. Their
+differences are not documented at the command level:
+
+- `whoami`: who am I, what key am I using, what DB am I connected to
+- `context show`: what context overrides are persisted locally
+- `env`: what environment variables are currently resolved
+
+A user who runs all three will see repetition without understanding what each is
+authoritative for. With `--json`, this becomes especially confusing: which command's
+output is the right one to parse in a script?
+
+Clarify by making each command the canonical source for exactly one thing. `whoami`
+should be the identity oracle — the one command to run when you need to confirm who you
+are and what you are connected to. `context show` should focus on user-set overrides.
+`env` should focus on the raw environment resolution chain. Brief descriptions at the
+start of each command's output (or in `--help`) would resolve most of the confusion.
+
+---
+
+### The `export site` output has no bundled viewer
+
+`dooh export site` produces clean, well-structured JSON. But there is no example HTML,
+no template, no reference viewer. The feature is complete from the data side and empty
+from the presentation side. Users who run the command get a directory of JSON files and
+no indication of how to use them.
+
+A minimal bundled viewer — a single `index.html` that reads `tasks.json` and
+`collections.json` with no build step and no external dependencies — would make the
+export feature immediately useful and demonstrate what the data model looks like to an
+external consumer. This is a small amount of work for a large improvement in
+discoverability.
+
+---
+
+## Priority Index
 
 | Priority | Item | Category |
 |---|---|---|
-| P0 | `--json` output mode on all commands | Next feature |
-| P0 | `task show --id` | Next feature |
-| P0 | `task update` command | Next feature |
-| P0 | TUI stability (footer, width, alignment, flicker) | Improvement |
-| P1 | `task list` filtering flags | Next feature |
-| P1 | `event list` CLI command | Next feature |
-| P1 | Task-to-collection membership commands | Next feature |
-| P1 | Context banner suppression (`--quiet`, `--json`) | Interface inelegance |
-| P1 | Consistent ID format in command output | Interface inelegance |
-| P2 | `description` and `urls` task fields | Next feature |
-| P2 | `collection show` command | Next feature |
-| P2 | Per-command help text | Improvement |
-| P2 | Remove `groups` from UX | Interface confusion |
-| P2 | TUI filter token discoverability | Interface confusion |
-| P2 | `collection list` show kind + task count | Interface inelegance |
-| P3 | Simplified first-time setup (`dooh init`) | Improvement |
-| P3 | Auth model documentation clarity | Improvement |
-| P3 | Area navigation view in TUI | Next feature |
-| P3 | Distinct exit codes by error category | Improvement |
-| P3 | Batch operations | Next feature |
-| P3 | Lower-privilege user lookup | Next feature |
-| P3 | `task list` show collection column | Improvement |
-| P3 | TUI note on how to write tasks | Interface confusion |
-| P4 | Theme system redesign | Improvement |
-| P4 | Bubble Tea viewport + command palette | Next feature |
-| P4 | TUI write operations | Next feature |
-| P4 | `export site` bundled viewer / example | Interface confusion |
+| P0 | TUI stability: footer, width, alignment, flicker | Polish |
+| P0 | `in-progress` task status + `task start` CLI command | Design shift |
+| P1 | Actor glyph (H/A) in task rows | Design shift |
+| P1 | `dooh log`: beautiful event stream viewer | Design shift |
+| P1 | TUI quick-add (`n` key) | Design shift |
+| P1 | `urls` field on tasks; remove `groups` from TUI | Feature + cleanup |
+| P2 | "Since you were away" TUI view | Design shift |
+| P2 | Collection hierarchy navigation (breadcrumb + Left key) | Design shift |
+| P2 | `dooh init` interactive setup command | UX improvement |
+| P2 | Area view in TUI (`6` key) | Feature |
+| P2 | Priority semantics: define and document `now/soon/later` | Clarity |
+| P2 | Remove `groups` from TUI or give it a definition | Cleanup |
+| P2 | Filter token syntax: placeholder + help hint in TUI | Discoverability |
+| P3 | Dual binary → single binary with `--home` flag | Simplification |
+| P3 | Theme redesign: semantic tokens + contrast tests | Polish |
+| P3 | Scheduling intelligence: rollover, today CLI, estimates | Design shift |
+| P3 | Batch operations on status-change commands | Feature |
+| P3 | Outbox: consumer, status command, or removal | Cleanup |
+| P3 | README: lead with setup script, move manual steps to appendix | Clarity |
+| P3 | `whoami`/`context show`/`env` boundary clarification | Clarity |
+| P4 | `export site` bundled HTML viewer | Feature |
+| P4 | Bubble Tea viewport + command palette | Polish |
