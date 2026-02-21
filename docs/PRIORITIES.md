@@ -302,6 +302,8 @@ timestamp. New command: `task start --id <id>`. Event type: `task.started`. Expo
 updated. TUI icon (◎ or ▶) and row ordering (in-progress floats to top) land once
 TUI stability is complete.
 
+_CLI complete: `task start`, schema migration, `task.started` event, and exporter updated. TUI icon (◎/▶) and float-to-top ordering remain deferred until TUI stability is done._
+
 ---
 
 ### P1 — After P0; CLI-first items can begin during P0
@@ -568,7 +570,7 @@ _(See Implementation Plan: P4)_
 | Priority | Item | Category |
 |---|---|---|
 | P0 | TUI stability: footer, width, alignment, flicker | Polish |
-| P0 | `in-progress` task status + `task start` CLI command | Design shift |
+| P0 | `in-progress` task status + `task start` CLI command | Design shift | ✅ CLI done; TUI icon deferred |
 | P1 | Checklist migration (drop `task_subtasks`, add `task_checklist`) | Design shift |
 | P1 | `description` + `urls` fields on tasks; remove `groups` from TUI | Feature + cleanup |
 | P1 | `dooh log`: colorized event stream viewer | Design shift |

@@ -57,6 +57,7 @@ func printTaskHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "  list         list tasks (with optional filters)")
 	_, _ = fmt.Fprintln(out, "  show         show detail for a single task")
 	_, _ = fmt.Fprintln(out, "  update       update task fields (title, priority, due, ...)")
+	_, _ = fmt.Fprintln(out, "  start        mark a task as in progress")
 	_, _ = fmt.Fprintln(out, "  complete     mark task as completed")
 	_, _ = fmt.Fprintln(out, "  reopen       reopen a completed or archived task")
 	_, _ = fmt.Fprintln(out, "  archive      archive a task")
