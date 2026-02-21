@@ -50,6 +50,11 @@ dooh --json user lookup
 dooh --json task list
 dooh --json collection list
 ```
+4. Understand the collection landscape before creating tasks or projects:
+```bash
+dooh --json collection list
+dooh --json collection show --id c_XXXXXX
+```
 
 ## Environment contract
 Required:
@@ -88,11 +93,14 @@ dooh --json task list --status all --sort scheduled
 ```bash
 dooh task block --id t_XXXXXX --by t_YYYYYY
 dooh task unblock --id t_XXXXXX --by t_YYYYYY
-dooh task subtask add --parent t_XXXXXX --child t_YYYYYY
-dooh task subtask remove --parent t_XXXXXX --child t_YYYYYY
+dooh task subtask add --parent t_XXXXXX --child t_YYYYYY   # pending: becomes task checklist (P1)
+dooh task subtask remove --parent t_XXXXXX --child t_YYYYYY # pending: becomes task checklist (P1)
 dooh task assign add --id t_XXXXXX --user <user_id>
 dooh task assign remove --id t_XXXXXX --user <user_id>
 ```
+
+> **Upcoming (P1):** `task subtask` commands will be replaced by `task checklist add/check/uncheck/remove`.
+> Until then, use `task subtask` for step tracking. See `docs/PRIORITIES.md` and `docs/COLLECTION_MODEL.md`.
 
 ### Collection membership
 ```bash

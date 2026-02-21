@@ -39,6 +39,10 @@ Use this checklist before cutting each release.
   - dev: `~/.config/dooh-dev`
 - Optional override for channel isolation: `DOOH_HOME`.
 
+> **Note (P3):** The dual-binary model is planned for deprecation. The target is a single
+> `dooh` binary with channel isolation via `DOOH_HOME` or `--home`. See `docs/PRIORITIES.md`
+> (Big Change 5). Until then, verify both binaries resolve to distinct config/db paths.
+
 ## 6) Data safety
 - Stable channel must not use demo seed data.
 - Dev channel may use demo seed data only in isolated db.

@@ -227,7 +227,7 @@ is what the documentation leads with.
 
 ---
 
-### 8. Replace subtasks with a task checklist
+### 7. Replace subtasks with a task checklist
 
 The current subtask model — full tasks linked via a `task_subtasks` join table — creates
 a hierarchy that collapses on itself. A subtask with its own priority, due date, assignee,
@@ -263,7 +263,7 @@ auto-complete — simpler to query than the current child-task-status approach.
 
 ---
 
-### 7. Build the scheduling intelligence the schema promises
+### 8. Build the scheduling intelligence the schema promises
 
 The schema has `rollover_enabled`, `skip_weekends`, `scheduled_at`, and
 `estimated_minutes`. These are real scheduling concepts. But none of them drive any
@@ -311,8 +311,9 @@ star; these are the immediate next steps ordered by impact.
 - **TUI quick-add** (`n` key): inline two-field form (title + priority cycle). Commit on
   `Enter`. The pattern is already established by the filter input mode.
 
-- **`urls` field on tasks**: schema migration, `task add --url`, `task update --url`,
-  TUI expanded card display. Remove `groups` from TUI in the same pass.
+- **`description` and `urls` fields on tasks**: schema migration (`tasks.description TEXT`,
+  `tasks.urls TEXT`), `task add --description --url` (repeatable), `task update --description
+  --url --clear-urls`, TUI expanded card display. Remove `groups` from TUI in the same pass.
 
 - **Subtask → checklist migration**: drop `task_subtasks`, add `task_checklist`,
   replace `task subtask` CLI commands with `task checklist`, update TUI expanded card
@@ -339,6 +340,9 @@ star; these are the immediate next steps ordered by impact.
 
 - **Filter token syntax**: add a `#tag ~area @user …` placeholder to the TUI filter input
   and a token syntax hint to the TUI help screen or expanded footer.
+
+- **TUI sort controls**: `o` key cycles sort mode (priority → scheduled → default). Show
+  active sort as a chip in the top bar. Quoted multi-word filter tokens (`#"Deep Work"`).
 
 **P3 — Polish and completeness**
 
@@ -549,7 +553,7 @@ discoverability.
 | P1 | Actor glyph (H/A) in task rows | Design shift |
 | P1 | `dooh log`: beautiful event stream viewer | Design shift |
 | P1 | TUI quick-add (`n` key) | Design shift |
-| P1 | `urls` field on tasks; remove `groups` from TUI | Feature + cleanup |
+| P1 | `description` + `urls` fields on tasks; remove `groups` from TUI | Feature + cleanup |
 | P1 | Subtask → checklist migration (drop `task_subtasks`, add `task_checklist`) | Design shift |
 | P2 | "Since you were away" TUI view | Design shift |
 | P2 | Collection hierarchy navigation (breadcrumb + Left key) | Design shift |
@@ -557,6 +561,7 @@ discoverability.
 | P2 | Area view in TUI (`6` key) | Feature |
 | P2 | Priority semantics: define and document `now/soon/later` | Clarity |
 | P2 | Filter token syntax: placeholder + help hint in TUI | Discoverability |
+| P2 | TUI sort controls: `o` key, sort chip, quoted filter tokens | UX improvement |
 | P3 | Dual binary → single binary with `--home` flag | Simplification |
 | P3 | Theme redesign: semantic tokens + contrast tests | Polish |
 | P3 | Scheduling intelligence: rollover, today CLI, estimates | Design shift |

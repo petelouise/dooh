@@ -36,9 +36,9 @@
 - Tasks belong to many collections.
 - Collections belong to many parent collections.
 - Collection membership is inherited upward.
-- Tasks support assignees, subtasks, due/scheduled dates, rollover, skip-weekends, estimate, dependencies, and priority (`now|soon|later`).
+- Tasks support assignees, checklist items, due/scheduled dates, rollover, skip-weekends, estimate, dependencies, and priority (`now|soon|later`).
 - Completion blocked if dependency blockers are incomplete.
-- Parent auto-completes when all subtasks are complete; parent reopens when a new incomplete subtask is added.
+- Task may auto-complete when all checklist items are checked. (`task_subtasks` is being replaced by `task_checklist` — see `docs/COLLECTION_MODEL.md`.)
 - Archive is reversible.
 - Hard purge is disabled (never).
 

@@ -1,5 +1,10 @@
 # Stable + Dev Channels
 
+> **Deprecation notice (P3):** The dual-binary model described here is planned for
+> removal. The target design is a single `dooh` binary with channel isolation via
+> `DOOH_HOME=~/.config/dooh-dev` or an alias. See `docs/PRIORITIES.md` (Big Change 5).
+> This document reflects current reality until that migration is complete.
+
 Use two channels side-by-side:
 - `dooh` for real data.
 - `dooh-dev` for experiments/demo data.
