@@ -25,11 +25,11 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 	case "update":
 		return runTaskUpdate(rt, args[1:], out)
 	case "complete":
-		return runTaskStatus(rt, args[1:], out, "completed", "task.completed")
+		return runTaskStatus(rt, args[1:], out, "completed", "task.completed", "complete")
 	case "reopen":
-		return runTaskStatus(rt, args[1:], out, "open", "task.reopened")
+		return runTaskStatus(rt, args[1:], out, "open", "task.reopened", "reopen")
 	case "archive":
-		return runTaskStatus(rt, args[1:], out, "archived", "task.archived")
+		return runTaskStatus(rt, args[1:], out, "archived", "task.archived", "archive")
 	case "block":
 		return runTaskBlock(rt, args[1:], out, true)
 	case "unblock":
@@ -64,6 +64,190 @@ func printTaskHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "  subtask      manage subtask relationships (add|remove)")
 	_, _ = fmt.Fprintln(out, "  assign       manage assignees (add|remove)")
 	_, _ = fmt.Fprintln(out, "  collection   manage collection membership (add|remove)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "run 'dooh task <subcommand> --help' for flags and examples")
+	return nil
+}
+
+func printTaskAddHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task add --title <string> [flags]")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "create a new task")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --title <string>        task title")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "optional:")
+	_, _ = fmt.Fprintln(out, "  --priority <string>     now|soon|later (default: later)")
+	_, _ = fmt.Fprintln(out, "  --description <string>  task description")
+	_, _ = fmt.Fprintln(out, "  --due <date>            due date ISO8601 (e.g. 2026-03-15)")
+	_, _ = fmt.Fprintln(out, "  --scheduled <date>      scheduled date ISO8601")
+	_, _ = fmt.Fprintln(out, "  --estimate <int>        estimated minutes")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh task add --title \"Water mint patch\" --priority now")
+	_, _ = fmt.Fprintln(out, "  dooh --json task add --title \"Count finches\" --priority soon --due 2026-03-01")
+	_, _ = fmt.Fprintln(out, "  dooh --json --quiet task add --title \"Draft report\" --priority later --description \"Q1 summary\"")
+	return nil
+}
+
+func printTaskListHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task list [flags]")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "list tasks with optional filters")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "flags:")
+	_, _ = fmt.Fprintln(out, "  --status <string>      open|completed|archived|all (default: open)")
+	_, _ = fmt.Fprintln(out, "  --priority <string>    now|soon|later|all (default: all)")
+	_, _ = fmt.Fprintln(out, "  --assignee <user_id>   filter by assignee user ID")
+	_, _ = fmt.Fprintln(out, "  --collection <id>      filter by collection short_id or ID")
+	_, _ = fmt.Fprintln(out, "  --limit <int>          max tasks to return (default: 100)")
+	_, _ = fmt.Fprintln(out, "  --offset <int>         skip this many tasks (default: 0)")
+	_, _ = fmt.Fprintln(out, "  --sort <field>         updated|priority|scheduled|created (default: updated)")
+	_, _ = fmt.Fprintln(out, "  --order <string>       asc|desc (default: desc)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh --json task list")
+	_, _ = fmt.Fprintln(out, "  dooh --json task list --status open --priority now")
+	_, _ = fmt.Fprintln(out, "  dooh --json task list --assignee <user_id> --sort priority --order asc")
+	_, _ = fmt.Fprintln(out, "  dooh --json task list --collection c_XXXXXX --limit 10")
+	_, _ = fmt.Fprintln(out, "  dooh --json task list --status all --sort scheduled")
+	return nil
+}
+
+func printTaskShowHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task show --id <id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "show all details for a single task including assignees, blockers, subtasks, and collections")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   task short_id or full ID (e.g. t_abc123)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh --json task show --id t_abc123")
+	return nil
+}
+
+func printTaskUpdateHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task update --id <id> [fields to update]")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "update task fields; at least one field flag is required")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>               task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "optional (provide at least one):")
+	_, _ = fmt.Fprintln(out, "  --title <string>        new title")
+	_, _ = fmt.Fprintln(out, "  --priority <string>     now|soon|later")
+	_, _ = fmt.Fprintln(out, "  --description <string>  new description")
+	_, _ = fmt.Fprintln(out, "  --due <date>            ISO8601 date, or 'clear' to remove")
+	_, _ = fmt.Fprintln(out, "  --scheduled <date>      ISO8601 date, or 'clear' to remove")
+	_, _ = fmt.Fprintln(out, "  --estimate <int>        estimated minutes; 0 to clear")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh --json task update --id t_abc123 --priority now --due 2026-03-15")
+	_, _ = fmt.Fprintln(out, "  dooh --json task update --id t_abc123 --due clear")
+	_, _ = fmt.Fprintln(out, "  dooh --json task update --id t_abc123 --title \"Revised title\"")
+	return nil
+}
+
+func printTaskStatusHelp(verb string, out io.Writer) error {
+	_, _ = fmt.Fprintf(out, "usage: dooh task %s --id <id>\n", verb)
+	_, _ = fmt.Fprintln(out, "")
+	switch verb {
+	case "complete":
+		_, _ = fmt.Fprintln(out, "mark a task as completed")
+		_, _ = fmt.Fprintln(out, "note: task cannot be completed while it has open blockers")
+	case "reopen":
+		_, _ = fmt.Fprintln(out, "reopen a completed or archived task (sets status back to open)")
+	case "archive":
+		_, _ = fmt.Fprintln(out, "archive a task (hidden from default list view)")
+	}
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintf(out, "example:\n  dooh --json task %s --id t_abc123\n", verb)
+	return nil
+}
+
+func printTaskDeleteHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task delete --id <id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "soft-delete a task (hidden from list; record retained in database)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "example:")
+	_, _ = fmt.Fprintln(out, "  dooh task delete --id t_abc123")
+	return nil
+}
+
+func printTaskBlockHelp(verb string, out io.Writer) error {
+	_, _ = fmt.Fprintf(out, "usage: dooh task %s --id <id> --by <blocking_id>\n", verb)
+	_, _ = fmt.Fprintln(out, "")
+	if verb == "block" {
+		_, _ = fmt.Fprintln(out, "declare that a task is blocked by another task")
+		_, _ = fmt.Fprintln(out, "note: cycle detection prevents circular dependencies")
+	} else {
+		_, _ = fmt.Fprintln(out, "remove a dependency blocker relationship")
+	}
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   the task that is blocked (dependent task)")
+	_, _ = fmt.Fprintln(out, "  --by <id>   the task that blocks it (the dependency)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintf(out, "example:\n  dooh task %s --id t_abc123 --by t_xyz789\n", verb)
+	return nil
+}
+
+func printTaskSubtaskHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task subtask add|remove --parent <id> --child <id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "manage subtask relationships between tasks")
+	_, _ = fmt.Fprintln(out, "note: cycle detection prevents circular subtask chains")
+	_, _ = fmt.Fprintln(out, "note: parent task auto-completes when all subtasks complete")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --parent <id>   parent task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "  --child <id>    child (subtask) short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh task subtask add --parent t_abc123 --child t_xyz789")
+	_, _ = fmt.Fprintln(out, "  dooh task subtask remove --parent t_abc123 --child t_xyz789")
+	return nil
+}
+
+func printTaskAssignHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task assign add|remove --id <id> --user <user_id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "manage task assignees")
+	_, _ = fmt.Fprintln(out, "tip: use 'dooh --json user lookup' to find user IDs")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>       task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "  --user <id>     user ID to assign or unassign")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh task assign add --id t_abc123 --user <user_id>")
+	_, _ = fmt.Fprintln(out, "  dooh task assign remove --id t_abc123 --user <user_id>")
+	return nil
+}
+
+func printTaskCollectionHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task collection add|remove --id <id> --collection <collection_id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "manage task collection membership")
+	_, _ = fmt.Fprintln(out, "tip: use 'dooh --json collection list' to find collection IDs")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>              task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "  --collection <id>      collection short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh task collection add --id t_abc123 --collection c_xyz789")
+	_, _ = fmt.Fprintln(out, "  dooh task collection remove --id t_abc123 --collection c_xyz789")
 	return nil
 }
 
@@ -79,6 +263,9 @@ func runTaskAdd(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskAddHelp(out)
+		}
 		return err
 	}
 	if *title == "" {
@@ -179,6 +366,9 @@ func runTaskList(rt runtime, args []string, out io.Writer) error {
 	sort := fs.String("sort", "updated", "sort by (updated|priority|scheduled|created)")
 	order := fs.String("order", "desc", "sort order (asc|desc)")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskListHelp(out)
+		}
 		return err
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
@@ -270,6 +460,9 @@ func runTaskShow(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskShowHelp(out)
+		}
 		return err
 	}
 	if *target == "" {
@@ -458,6 +651,9 @@ func runTaskUpdate(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskUpdateHelp(out)
+		}
 		return err
 	}
 	if *target == "" {
@@ -552,6 +748,9 @@ func runTaskDelete(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskDeleteHelp(out)
+		}
 		return err
 	}
 	if *target == "" {
@@ -575,13 +774,16 @@ func runTaskDelete(rt runtime, args []string, out io.Writer) error {
 	return nil
 }
 
-func runTaskStatus(rt runtime, args []string, out io.Writer, status string, eventName string) error {
+func runTaskStatus(rt runtime, args []string, out io.Writer, status string, eventName string, verb string) error {
 	fs := flag.NewFlagSet("task status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	target := fs.String("id", "", "task id or short id")
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskStatusHelp(verb, out)
+		}
 		return err
 	}
 	if *target == "" {
@@ -635,6 +837,10 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 }
 
 func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
+	verb := "unblock"
+	if add {
+		verb = "block"
+	}
 	fs := flag.NewFlagSet("task block", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	target := fs.String("id", "", "task id or short id")
@@ -642,6 +848,9 @@ func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskBlockHelp(verb, out)
+		}
 		return err
 	}
 	if *target == "" || *by == "" {
@@ -695,7 +904,7 @@ func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
 
 func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("task subtask subcommand required: add|remove")
+		return printTaskSubtaskHelp(out)
 	}
 	add := false
 	switch args[0] {
@@ -703,6 +912,8 @@ func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 		add = true
 	case "remove":
 		add = false
+	case "help", "--help", "-h":
+		return printTaskSubtaskHelp(out)
 	default:
 		return fmt.Errorf("unknown task subtask command %q (available: add, remove)", args[0])
 	}
@@ -713,6 +924,9 @@ func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskSubtaskHelp(out)
+		}
 		return err
 	}
 	if *parent == "" || *child == "" {
@@ -772,7 +986,7 @@ func runTaskSubtask(rt runtime, args []string, out io.Writer) error {
 
 func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("task assign subcommand required: add|remove")
+		return printTaskAssignHelp(out)
 	}
 	add := false
 	switch args[0] {
@@ -780,6 +994,8 @@ func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 		add = true
 	case "remove":
 		add = false
+	case "help", "--help", "-h":
+		return printTaskAssignHelp(out)
 	default:
 		return fmt.Errorf("unknown task assign command %q (available: add, remove)", args[0])
 	}
@@ -790,6 +1006,9 @@ func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskAssignHelp(out)
+		}
 		return err
 	}
 	if *target == "" || *user == "" {
@@ -836,7 +1055,7 @@ func runTaskAssign(rt runtime, args []string, out io.Writer) error {
 
 func runTaskCollection(rt runtime, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("task collection subcommand required: add|remove")
+		return printTaskCollectionHelp(out)
 	}
 	add := false
 	switch args[0] {
@@ -844,6 +1063,8 @@ func runTaskCollection(rt runtime, args []string, out io.Writer) error {
 		add = true
 	case "remove":
 		add = false
+	case "help", "--help", "-h":
+		return printTaskCollectionHelp(out)
 	default:
 		return fmt.Errorf("unknown task collection command %q (available: add, remove)", args[0])
 	}
@@ -854,6 +1075,9 @@ func runTaskCollection(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskCollectionHelp(out)
+		}
 		return err
 	}
 	if *target == "" || *coll == "" {

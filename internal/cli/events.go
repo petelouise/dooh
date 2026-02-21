@@ -55,12 +55,33 @@ func printEventHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "event subcommands:")
 	_, _ = fmt.Fprintln(out, "  list   query audit event log")
 	_, _ = fmt.Fprintln(out, "")
-	_, _ = fmt.Fprintln(out, "flags for event list:")
-	_, _ = fmt.Fprintln(out, "  --limit N              max events to return (default 20)")
-	_, _ = fmt.Fprintln(out, "  --type <event_type>    filter by event type (e.g. task.created)")
+	_, _ = fmt.Fprintln(out, "run 'dooh event list --help' for flags and examples")
+	return nil
+}
+
+func printEventListHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh event list [flags]")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "query the audit event log; returns events in reverse chronological order")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "flags:")
+	_, _ = fmt.Fprintln(out, "  --limit <int>          max events to return (default: 20)")
+	_, _ = fmt.Fprintln(out, "  --type <event_type>    filter by event type (e.g. task.created, task.completed)")
 	_, _ = fmt.Fprintln(out, "  --actor <user_id>      filter by actor user ID")
-	_, _ = fmt.Fprintln(out, "  --client-type <type>   filter by client type (human_cli|agent_cli)")
+	_, _ = fmt.Fprintln(out, "  --client-type <type>   filter by client type: human_cli|agent_cli")
 	_, _ = fmt.Fprintln(out, "  --since <timestamp>    events after this ISO8601 timestamp")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "event types include:")
+	_, _ = fmt.Fprintln(out, "  task.created, task.updated, task.completed, task.reopened, task.archived")
+	_, _ = fmt.Fprintln(out, "  task.deleted, task.blocked, task.unblocked, task.subtask_added")
+	_, _ = fmt.Fprintln(out, "  task.assignee_added, task.assignee_removed, task.collection_added")
+	_, _ = fmt.Fprintln(out, "  collection.created, collection.linked, collection.unlinked")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh --json event list")
+	_, _ = fmt.Fprintln(out, "  dooh --json event list --limit 50 --client-type agent_cli")
+	_, _ = fmt.Fprintln(out, "  dooh --json event list --type task.created --actor <user_id>")
+	_, _ = fmt.Fprintln(out, "  dooh --json event list --since 2026-02-01T00:00:00Z")
 	return nil
 }
 
@@ -75,6 +96,9 @@ func runEventList(rt runtime, args []string, out io.Writer) error {
 	clientType := fs.String("client-type", "", "filter by client type")
 	since := fs.String("since", "", "events after this timestamp")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printEventListHelp(out)
+		}
 		return err
 	}
 

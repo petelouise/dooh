@@ -80,7 +80,7 @@ func Run(args []string, stdout io.Writer) error {
 
 	switch rest[0] {
 	case "version", "--version", "-v":
-		_, _ = fmt.Fprintln(stdout, "0.3.0")
+		_, _ = fmt.Fprintln(stdout, "0.3.1")
 		return nil
 	case "config":
 		return runConfig(rt, rest[1:], stdout)

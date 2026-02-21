@@ -98,6 +98,12 @@ func printConfigHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "config subcommands:")
 	_, _ = fmt.Fprintln(out, "  show   display resolved config for current profile")
 	_, _ = fmt.Fprintln(out, "  init   create starter config.toml file")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh config show")
+	_, _ = fmt.Fprintln(out, "  dooh --profile human config show")
+	_, _ = fmt.Fprintln(out, "  dooh --json config show")
+	_, _ = fmt.Fprintln(out, "  dooh config init")
 	return nil
 }
 
@@ -107,6 +113,16 @@ func runWhoAmI(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprintln(out, "usage: dooh whoami")
+			_, _ = fmt.Fprintln(out, "")
+			_, _ = fmt.Fprintln(out, "show authenticated identity (profile, user, key prefix, client_type)")
+			_, _ = fmt.Fprintln(out, "")
+			_, _ = fmt.Fprintln(out, "examples:")
+			_, _ = fmt.Fprintln(out, "  dooh whoami")
+			_, _ = fmt.Fprintln(out, "  dooh --json whoami")
+			return nil
+		}
 		return err
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
@@ -193,6 +209,9 @@ func runContext(rt runtime, args []string, out io.Writer) error {
 		dbPath := fs.String("db", "", "sqlite database path override")
 		theme := fs.String("theme", "", "theme override")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return printContextHelp(out)
+			}
 			return err
 		}
 		if strings.TrimSpace(*profile) == "" && strings.TrimSpace(*dbPath) == "" && strings.TrimSpace(*theme) == "" {
@@ -232,6 +251,12 @@ func printContextHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "  show    display current profile, db, theme, and auth state")
 	_, _ = fmt.Fprintln(out, "  set     persist local overrides (--profile, --db, --theme)")
 	_, _ = fmt.Fprintln(out, "  clear   remove all local overrides")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "examples:")
+	_, _ = fmt.Fprintln(out, "  dooh context show")
+	_, _ = fmt.Fprintln(out, "  dooh context set --profile human --theme paper-fruit")
+	_, _ = fmt.Fprintln(out, "  dooh context set --db ./dooh.db")
+	_, _ = fmt.Fprintln(out, "  dooh context clear")
 	return nil
 }
 

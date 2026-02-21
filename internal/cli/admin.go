@@ -16,11 +16,23 @@ import (
 	"dooh/internal/idgen"
 )
 
+func printDBHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "db subcommands:")
+	_, _ = fmt.Fprintln(out, "  init   initialize a new database")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "usage: dooh db init [--db <path>]")
+	_, _ = fmt.Fprintln(out, "example:")
+	_, _ = fmt.Fprintln(out, "  dooh db init --db ./dooh.db")
+	return nil
+}
+
 func runDB(rt runtime, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(out, "db subcommands:")
-		_, _ = fmt.Fprintln(out, "  init   initialize a new database")
-		return nil
+		return printDBHelp(out)
+	}
+	switch args[0] {
+	case "help", "--help", "-h":
+		return printDBHelp(out)
 	}
 	if args[0] != "init" {
 		return fmt.Errorf("unknown db command %q (available: init)", args[0])
@@ -29,6 +41,9 @@ func runDB(rt runtime, args []string, out io.Writer) error {
 	fs.SetOutput(io.Discard)
 	dbPath := fs.String("db", "", "sqlite database path")
 	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printDBHelp(out)
+		}
 		return err
 	}
 	dbResolved := resolveDB(rt, *dbPath)
@@ -169,6 +184,11 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 		bootstrap := fs.Bool("bootstrap", false, "allow first admin user/key bootstrap when no keys exist")
 		allowSystemAdmin := fs.Bool("allow-system-admin", false, "allow non-human system key for lifecycle admin actions")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				_, _ = fmt.Fprintln(out, "usage: dooh user create --name <string> [--db <path>] [--bootstrap]")
+				_, _ = fmt.Fprintln(out, "requires users:admin scope (human actor by default)")
+				return nil
+			}
 			return err
 		}
 		if *name == "" {
@@ -211,6 +231,12 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 		dbPath := fs.String("db", "", "sqlite database path")
 		apiKey := fs.String("api-key", "", "api key")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				_, _ = fmt.Fprintln(out, "usage: dooh user list [--db <path>]")
+				_, _ = fmt.Fprintln(out, "requires users:admin scope (human actor by default)")
+				_, _ = fmt.Fprintln(out, "tip: use 'dooh user lookup' if you only need user IDs (requires tasks:read scope)")
+				return nil
+			}
 			return err
 		}
 		sqlite := db.New(resolveDB(rt, *dbPath))
@@ -254,9 +280,11 @@ func runUser(rt runtime, args []string, out io.Writer) error {
 
 func printUserHelp(out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "user subcommands:")
-	_, _ = fmt.Fprintln(out, "  create   create a new user (admin only)")
-	_, _ = fmt.Fprintln(out, "  list     list all users (admin only)")
-	_, _ = fmt.Fprintln(out, "  lookup   list active user IDs and names (any authenticated user)")
+	_, _ = fmt.Fprintln(out, "  create   create a new user (requires users:admin scope)")
+	_, _ = fmt.Fprintln(out, "  list     list all users (requires users:admin scope)")
+	_, _ = fmt.Fprintln(out, "  lookup   list active user IDs and names (requires tasks:read scope)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "run 'dooh user <subcommand> --help' for flags")
 	return nil
 }
 
@@ -266,6 +294,16 @@ func runUserLookup(rt runtime, args []string, out io.Writer) error {
 	dbPath := fs.String("db", "", "sqlite database path")
 	apiKey := fs.String("api-key", "", "api key")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprintln(out, "usage: dooh user lookup [--db <path>]")
+			_, _ = fmt.Fprintln(out, "")
+			_, _ = fmt.Fprintln(out, "list active user IDs and names; requires tasks:read scope (available to AI agents)")
+			_, _ = fmt.Fprintln(out, "use this to discover user IDs needed for task assignment")
+			_, _ = fmt.Fprintln(out, "")
+			_, _ = fmt.Fprintln(out, "example:")
+			_, _ = fmt.Fprintln(out, "  dooh --json user lookup")
+			return nil
+		}
 		return err
 	}
 	sqlite := db.New(resolveDB(rt, *dbPath))
@@ -295,14 +333,26 @@ func runUserLookup(rt runtime, args []string, out io.Writer) error {
 	return nil
 }
 
+func printKeyHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "key subcommands:")
+	_, _ = fmt.Fprintln(out, "  create   create a new API key (requires keys:admin scope)")
+	_, _ = fmt.Fprintln(out, "  revoke   revoke an API key (requires keys:admin scope)")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "available scopes: tasks:read tasks:write tasks:delete")
+	_, _ = fmt.Fprintln(out, "                  collections:read collections:write")
+	_, _ = fmt.Fprintln(out, "                  export:run users:admin keys:admin system:rollback")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "run 'dooh key <subcommand> --help' for flags")
+	return nil
+}
+
 func runKey(rt runtime, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(out, "key subcommands:")
-		_, _ = fmt.Fprintln(out, "  create   create a new API key (admin only)")
-		_, _ = fmt.Fprintln(out, "  revoke   revoke an API key (admin only)")
-		return nil
+		return printKeyHelp(out)
 	}
 	switch args[0] {
+	case "help", "--help", "-h":
+		return printKeyHelp(out)
 	case "create":
 		fs := flag.NewFlagSet("key create", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
@@ -314,6 +364,12 @@ func runKey(rt runtime, args []string, out io.Writer) error {
 		bootstrap := fs.Bool("bootstrap", false, "allow first key creation when no keys exist")
 		allowSystemAdmin := fs.Bool("allow-system-admin", false, "allow non-human system key for lifecycle admin actions")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				_, _ = fmt.Fprintln(out, "usage: dooh key create --user <user_id> --scopes <scopes> [--client-type human_cli|agent_cli]")
+				_, _ = fmt.Fprintln(out, "requires keys:admin scope (human actor by default)")
+				_, _ = fmt.Fprintln(out, "example: dooh key create --user <id> --scopes \"tasks:read,tasks:write,collections:read,collections:write,export:run\" --client-type agent_cli")
+				return nil
+			}
 			return err
 		}
 		if *user == "" {
@@ -363,6 +419,11 @@ func runKey(rt runtime, args []string, out io.Writer) error {
 		apiKey := fs.String("api-key", "", "admin api key")
 		allowSystemAdmin := fs.Bool("allow-system-admin", false, "allow non-human system key for lifecycle admin actions")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				_, _ = fmt.Fprintln(out, "usage: dooh key revoke --prefix <key_prefix>")
+				_, _ = fmt.Fprintln(out, "requires keys:admin scope (human actor by default)")
+				return nil
+			}
 			return err
 		}
 		if *prefix == "" {
