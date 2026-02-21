@@ -158,3 +158,58 @@ func TestUserDeleteCommandIsNotSupported(t *testing.T) {
 		t.Fatalf("expected user delete to be unsupported, got err=%v out=%s", err, out.String())
 	}
 }
+
+func TestTaskStartTransitionsToInProgress(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	path := filepath.Join(t.TempDir(), "start_test.db")
+	sqlite := db.New(path)
+	if err := initDatabase(sqlite); err != nil {
+		t.Fatal(err)
+	}
+
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u_h','Human','active');")
+	mustExec(t, sqlite, "INSERT INTO api_keys(id,user_id,key_prefix,key_hash,scopes,client_type,revoked_at) VALUES('k_h','u_h','hhhhhhhh','"+auth.HashAPIKey("dooh_test_key")+"','tasks:write,tasks:read','human_cli',NULL);")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,created_by,updated_by) VALUES('t1','t_AAA','Test task','open','now','u_h','u_h');")
+
+	var out bytes.Buffer
+	if err := Run([]string{"task", "start", "--db", path, "--api-key", "dooh_test_key", "--id", "t_AAA"}, &out); err != nil {
+		t.Fatalf("task start failed: %v", err)
+	}
+
+	rows, err := sqlite.QueryTSV("SELECT status, started_at FROM tasks WHERE id='t1';")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 || rows[0][0] != "in_progress" {
+		t.Fatalf("expected in_progress status, got %v", rows)
+	}
+	if rows[0][1] == "" {
+		t.Fatal("expected started_at to be set")
+	}
+}
+
+func TestTaskStartRejectsCompletedTask(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	path := filepath.Join(t.TempDir(), "start_reject.db")
+	sqlite := db.New(path)
+	if err := initDatabase(sqlite); err != nil {
+		t.Fatal(err)
+	}
+
+	mustExec(t, sqlite, "INSERT INTO users(id,name,status) VALUES('u_h','Human','active');")
+	mustExec(t, sqlite, "INSERT INTO api_keys(id,user_id,key_prefix,key_hash,scopes,client_type,revoked_at) VALUES('k_h','u_h','hhhhhhhh','"+auth.HashAPIKey("dooh_test_key2")+"','tasks:write,tasks:read','human_cli',NULL);")
+	mustExec(t, sqlite, "INSERT INTO tasks(id,short_id,title,status,priority,created_by,updated_by) VALUES('t2','t_BBB','Done task','completed','now','u_h','u_h');")
+
+	var out bytes.Buffer
+	err := Run([]string{"task", "start", "--db", path, "--api-key", "dooh_test_key2", "--id", "t_BBB"}, &out)
+	if err == nil {
+		t.Fatal("expected error starting a completed task")
+	}
+	if !strings.Contains(err.Error(), "cannot start") {
+		t.Fatalf("expected 'cannot start' error, got: %v", err)
+	}
+}

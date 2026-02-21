@@ -61,6 +61,8 @@ func statusCell(v string, width int) string {
 		return style(raw, "38;5;78")
 	case "archived":
 		return style(raw, "38;5;179")
+	case "in_progress":
+		return style(raw, "38;5;214")
 	case "open":
 		return style(raw, "38;5;81")
 	default:

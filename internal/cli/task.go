@@ -30,6 +30,8 @@ func runTask(rt runtime, args []string, out io.Writer) error {
 		return runTaskStatus(rt, args[1:], out, "open", "task.reopened", "reopen")
 	case "archive":
 		return runTaskStatus(rt, args[1:], out, "archived", "task.archived", "archive")
+	case "start":
+		return runTaskStart(rt, args[1:], out)
 	case "block":
 		return runTaskBlock(rt, args[1:], out, true)
 	case "unblock":
@@ -836,6 +838,65 @@ func runTaskStatus(rt runtime, args []string, out io.Writer, status string, even
 	return nil
 }
 
+func printTaskStartHelp(out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "usage: dooh task start --id <id>")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "mark a task as in progress (status: open → in_progress)")
+	_, _ = fmt.Fprintln(out, "sets started_at timestamp and emits a task.started event")
+	_, _ = fmt.Fprintln(out, "note: only open tasks can be started")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "required:")
+	_, _ = fmt.Fprintln(out, "  --id <id>   task short_id or full ID")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "example:")
+	_, _ = fmt.Fprintln(out, "  dooh --json task start --id t_abc123")
+	return nil
+}
+
+func runTaskStart(rt runtime, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("task start", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	target := fs.String("id", "", "task id or short id")
+	dbPath := fs.String("db", "", "sqlite database path")
+	apiKey := fs.String("api-key", "", "api key")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return printTaskStartHelp(out)
+		}
+		return err
+	}
+	if *target == "" {
+		return errors.New("--id is required")
+	}
+	sqlite := db.New(resolveDB(rt, *dbPath))
+	p, err := mustAuth(rt, sqlite, *apiKey, false, "tasks:write")
+	if err != nil {
+		return err
+	}
+	printWriteContext(out, rt, resolveDB(rt, *dbPath), p)
+	taskID, shortID, currentStatus, err := resolveTask(sqlite, *target)
+	if err != nil {
+		return err
+	}
+	if currentStatus != "open" {
+		return fmt.Errorf("cannot start task with status %q (only open tasks can be started)", currentStatus)
+	}
+	sql := fmt.Sprintf(
+		"UPDATE tasks SET status='in_progress', started_at=strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'), updated_by=%s, version=version+1 WHERE id=%s AND deleted_at IS NULL;",
+		db.Quote(p.UserID), db.Quote(taskID))
+	if err := sqlite.Exec(sql); err != nil {
+		return err
+	}
+	if err := writeEvent(sqlite, p, "task.started", "task", taskID, map[string]string{"task_id": taskID, "short_id": shortID, "status": "in_progress"}); err != nil {
+		return err
+	}
+	if rt.opts.JSON {
+		return writeJSON(out, map[string]string{"short_id": shortID, "id": taskID, "status": "in_progress"})
+	}
+	_, _ = fmt.Fprintf(out, "started task %s\n", shortID)
+	return nil
+}
+
 func runTaskBlock(rt runtime, args []string, out io.Writer, add bool) error {
 	verb := "unblock"
 	if add {
@@ -1121,8 +1182,10 @@ func runTaskCollection(rt runtime, args []string, out io.Writer) error {
 
 // --- helpers ---
 
-func resolveTask(sqlite db.SQLite, target string) (id string, shortID string, title string, err error) {
-	rows, err := sqlite.QueryTSV(fmt.Sprintf("SELECT id,short_id,title FROM tasks WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;", db.Quote(target), db.Quote(target)))
+func resolveTask(sqlite db.SQLite, target string) (id, shortID, status string, err error) {
+	rows, err := sqlite.QueryTSV(fmt.Sprintf(
+		"SELECT id, short_id, status FROM tasks WHERE (id=%s OR short_id=%s) AND deleted_at IS NULL LIMIT 1;",
+		db.Quote(target), db.Quote(target)))
 	if err != nil {
 		return "", "", "", err
 	}
