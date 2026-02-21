@@ -2,13 +2,35 @@
 
 This guide is for an AI coding agent operating `dooh` through CLI only.
 
+## Machine-readable output
+
+All data commands support `--json` as a global flag for structured output:
+```bash
+dooh --json task list
+dooh --json task show --id t_XXXXXX
+dooh --json whoami
+dooh --json event list
+```
+
+Use `--quiet` (or `-q`) to suppress the context banner on write commands:
+```bash
+dooh --quiet task add --title "Water mint patch" --priority now
+```
+
+Combine both for clean programmatic use:
+```bash
+dooh --json --quiet task add --title "Water mint patch" --priority now
+```
+
 ## Allowed vs disallowed
 
 | action | allowed for AI by default | notes |
 | --- | --- | --- |
-| task create/update/status/delete | yes | use `task` subcommands |
-| task assign/block/subtask | yes | supported in CLI |
-| collection create/list/link | yes | supported in CLI |
+| task create/update/show/status/delete | yes | use `task` subcommands |
+| task assign/block/subtask/collection | yes | supported in CLI |
+| collection create/list/show/link | yes | supported in CLI |
+| query audit events | yes | `dooh event list` |
+| user lookup (id + name) | yes | `dooh user lookup` |
 | export site data | yes | `dooh export site --out ...` |
 | create/revoke keys | no | human lifecycle admin by default |
 | create users | no (default) | human lifecycle admin by default |
@@ -17,12 +39,16 @@ This guide is for an AI coding agent operating `dooh` through CLI only.
 ## Startup contract (every run)
 1. Confirm identity:
 ```bash
-dooh whoami
+dooh --json whoami
 ```
-2. Read current state:
+2. Discover user IDs (needed for assignment):
 ```bash
-dooh task list
-dooh collection list
+dooh --json user lookup
+```
+3. Read current state:
+```bash
+dooh --json task list
+dooh --json collection list
 ```
 
 ## Environment contract
@@ -37,14 +63,25 @@ DOOH_HOME=~/.config/dooh-dev
 
 ## Copy/paste runbook
 
-### Create and update tasks
+### Create, read, update tasks
 ```bash
-dooh task add --title "Water mint patch" --priority now
-dooh task add --title "Count visiting finches" --priority soon
-dooh task complete --id t_XXXXXX
-dooh task reopen --id t_XXXXXX
-dooh task archive --id t_XXXXXX
+dooh --json task add --title "Water mint patch" --priority now
+dooh --json task add --title "Count finches" --priority soon --due 2026-03-01 --description "Tally at feeder"
+dooh --json task show --id t_XXXXXX
+dooh --json task update --id t_XXXXXX --priority now --due 2026-03-15
+dooh --json task update --id t_XXXXXX --due clear
+dooh --json task complete --id t_XXXXXX
+dooh --json task reopen --id t_XXXXXX
+dooh --json task archive --id t_XXXXXX
 dooh task delete --id t_XXXXXX
+```
+
+### Filter and sort tasks
+```bash
+dooh --json task list --status open --priority now
+dooh --json task list --assignee <user_id> --sort priority --order asc
+dooh --json task list --collection c_XXXXXX --limit 10
+dooh --json task list --status all --sort scheduled
 ```
 
 ### Relationships and assignees
@@ -57,24 +94,37 @@ dooh task assign add --id t_XXXXXX --user <user_id>
 dooh task assign remove --id t_XXXXXX --user <user_id>
 ```
 
+### Collection membership
+```bash
+dooh task collection add --id t_XXXXXX --collection c_YYYYYY
+dooh task collection remove --id t_XXXXXX --collection c_YYYYYY
+```
+
 ### Collections
 ```bash
-dooh collection add --name "Pollinator Patrol" --kind project
-dooh collection add --name "Backyard Pond" --kind area
-dooh collection add --name "Bees" --kind tag
-dooh collection list
+dooh --json collection add --name "Pollinator Patrol" --kind project
+dooh --json collection list
+dooh --json collection show --id c_XXXXXX
 dooh collection link --parent c_PARENT --child c_CHILD
 dooh collection unlink --parent c_PARENT --child c_CHILD
 ```
 
+### Audit trail
+```bash
+dooh --json event list
+dooh --json event list --limit 50 --client-type agent_cli
+dooh --json event list --type task.created --actor <user_id>
+dooh --json event list --since 2026-02-20T00:00:00Z
+```
+
 ### Verify and export
 ```bash
-dooh task list
+dooh --json task list
 dooh export site --out ./site-data
-sqlite3 ./dooh.db "select seq,event_type,actor_user_id,key_id,client_type,occurred_at from events order by seq desc limit 20;"
 ```
 
 ## Safety reminders
 - Always authenticated; anonymous mode is unsupported.
 - AI should not run lifecycle admin commands unless explicitly instructed with system override.
 - Re-read state after every mutation.
+- Use `--json` for all reads to avoid brittle text parsing.
